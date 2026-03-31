@@ -1,0 +1,369 @@
+---
+title: "H2OFrame"
+description: "The primary data structure in H2O. H2OFrame is a distributed data frame stored on the H2O cluster, analogous to a Pandas DataFrame or R data.frame."
+---
+
+`H2OFrame` is the core data container in H2O. Data is stored on the H2O cluster (which may be remote), and the Python object is a lightweight handle. Operations on an `H2OFrame` are executed lazily and distributed across the cluster.
+
+```python
+from h2o.frame import H2OFrame
+import h2o
+```
+
+<Note>
+  `H2OFrame` is also accessible directly as `h2o.H2OFrame` for convenience.
+</Note>
+
+---
+
+## Construction
+
+### From a Python object
+
+```python
+H2OFrame(
+    python_obj=None, destination_frame=None,
+    header=0, separator=",",
+    column_names=None, column_types=None,
+    na_strings=None, skipped_columns=None,
+    force_col_types=False
+)
+```
+
+<ParamField path="python_obj" type="list | dict | numpy.ndarray | pandas.DataFrame | scipy.sparse">
+  The source object to convert. Accepted types:
+
+  - `None` — creates an empty frame
+  - A flat list or tuple — creates a single-column frame
+  - A `{name: list}` dictionary — creates a multi-column frame
+  - A list of lists — rows of a rectangular table
+  - A Pandas DataFrame or NumPy ndarray
+  - A SciPy sparse matrix
+</ParamField>
+
+<ParamField path="destination_frame" type="string">
+  Key to assign the frame in H2O's distributed key-value store. Auto-generated if not provided.
+</ParamField>
+
+<ParamField path="header" type="integer" default="0">
+  Header detection when `python_obj` is a list of lists. `-1` = first row is data, `1` = first row is header, `0` = guess.
+</ParamField>
+
+<ParamField path="column_names" type="string[]">
+  Explicit column names. Overrides any names derived from the source data.
+</ParamField>
+
+<ParamField path="column_types" type="string[] | object">
+  Explicit column types. Valid values: `"unknown"`, `"uuid"`, `"string"`, `"float"`, `"real"`, `"double"`, `"int"`, `"long"`, `"numeric"`, `"categorical"`, `"factor"`, `"enum"`, `"time"`.
+</ParamField>
+
+<ParamField path="na_strings" type="string[] | string[][] | object">
+  Strings to interpret as missing values. Can be specified globally, per-column as a list-of-lists, or as a `{column: list}` dict.
+</ParamField>
+
+<CodeGroup>
+
+```python from list
+frame = h2o.H2OFrame([1, 2, 2.5, -100.9, 0])
+```
+
+```python from dict
+frame = h2o.H2OFrame({"age": [25, 30, 35], "salary": [50000, 75000, 90000]})
+```
+
+```python from pandas
+import pandas as pd
+df = pd.DataFrame({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+frame = h2o.H2OFrame(df)
+```
+
+```python from numpy
+import numpy as np
+arr = np.array([[1.0, 2.0], [3.0, 4.0]])
+frame = h2o.H2OFrame(arr)
+```
+
+</CodeGroup>
+
+---
+
+### From an imported file
+
+```python
+frame = h2o.import_file("s3://bucket/data.csv")
+```
+
+See [h2o.import_file](/api/python/h2o-module#h2o.import_file) and [h2o.upload_file](/api/python/h2o-module#h2o.upload_file) for file-based construction.
+
+---
+
+## Properties
+
+### nrows / nrow
+
+```python
+frame.nrows  # int
+```
+
+Number of rows in the frame.
+
+---
+
+### ncols / ncol
+
+```python
+frame.ncols  # int
+```
+
+Number of columns in the frame.
+
+---
+
+### shape
+
+```python
+frame.shape  # (nrows, ncols)
+```
+
+Tuple of `(nrows, ncols)`.
+
+---
+
+### columns / names
+
+```python
+frame.columns   # list[str]
+frame.names     # list[str]  (alias)
+```
+
+List of column names. Assigning to `frame.columns` renames all columns.
+
+---
+
+### types
+
+```python
+frame.types  # dict[str, str]
+```
+
+Dictionary mapping column names to their H2O type strings (e.g., `"int"`, `"real"`, `"enum"`, `"string"`, `"time"`).
+
+---
+
+### frame_id
+
+```python
+frame.frame_id  # str
+```
+
+Internal key identifying this frame on the H2O cluster.
+
+---
+
+## Inspection
+
+### head / tail
+
+```python
+frame.head(rows=10, cols=200)
+frame.tail(rows=10, cols=200)
+```
+
+Returns the first or last `rows` rows as an `H2OFrame`.
+
+---
+
+### describe
+
+```python
+frame.describe()
+```
+
+Print a summary of column types and the first ten rows.
+
+---
+
+### summary
+
+```python
+frame.summary()
+```
+
+Print statistical summaries (mean, min, max, quantiles, missing counts) for each column.
+
+---
+
+### as_data_frame
+
+```python
+frame.as_data_frame(use_pandas=True)
+```
+
+Convert the H2OFrame to a local Pandas DataFrame (or a Python list of lists when `use_pandas=False`).
+
+<ParamField path="use_pandas" type="boolean" default="True">
+  Return a Pandas DataFrame when `True`. Returns a list of lists otherwise.
+</ParamField>
+
+```python
+df = frame.as_data_frame()
+```
+
+---
+
+## Indexing and slicing
+
+H2OFrame supports NumPy-style indexing using `frame[row_selector, col_selector]`.
+
+```python
+# Single column by name
+col = frame["age"]
+
+# Multiple columns
+subset = frame[["age", "salary"]]
+
+# Row slice
+first_100 = frame[:100, :]
+
+# Row and column slice
+block = frame[10:20, 0:3]
+
+# Boolean row filter
+filtered = frame[frame["salary"] > 60000, :]
+```
+
+---
+
+## Column operations
+
+### cbind
+
+```python
+combined = frame1.cbind(frame2)
+```
+
+Append the columns of `frame2` to `frame1`. Both frames must have the same number of rows.
+
+---
+
+### rbind
+
+```python
+stacked = frame1.rbind(frame2)
+```
+
+Append the rows of `frame2` below `frame1`. Both frames must have the same column structure.
+
+---
+
+### merge
+
+```python
+result = frame1.merge(frame2, by_x=None, by_y=None, all_x=False, all_y=False)
+```
+
+Merge (join) two H2OFrames.
+
+<ParamField path="by_x" type="string | string[]">
+  Column name(s) in `frame1` to join on.
+</ParamField>
+
+<ParamField path="by_y" type="string | string[]">
+  Column name(s) in `frame2` to join on. Defaults to `by_x`.
+</ParamField>
+
+<ParamField path="all_x" type="boolean" default="False">
+  Perform a left outer join when `True`.
+</ParamField>
+
+---
+
+## Statistical operations
+
+### mean
+
+```python
+frame.mean(skipna=True, axis=0)
+```
+
+Compute the column-wise (or row-wise when `axis=1`) mean.
+
+---
+
+### var
+
+```python
+frame.var(y=None, na_rm=True, use="everything", weights_column=None)
+```
+
+Compute variance or the variance-covariance matrix for two columns.
+
+---
+
+### sd
+
+```python
+frame.sd(na_rm=True)
+```
+
+Compute the standard deviation of each column.
+
+---
+
+### cor
+
+```python
+frame.cor(y=None, na_rm=True, use="everything", weights_column=None)
+```
+
+Compute the correlation between columns.
+
+---
+
+## Type casting
+
+### asfactor
+
+```python
+frame["species"] = frame["species"].asfactor()
+```
+
+Convert a column to a categorical (factor/enum) type. Required for classification response columns.
+
+---
+
+### asnumeric
+
+```python
+frame["flag"] = frame["flag"].asnumeric()
+```
+
+Convert a column to a numeric type.
+
+---
+
+### ascharacter
+
+```python
+frame["code"] = frame["code"].ascharacter()
+```
+
+Convert a column to a string type.
+
+---
+
+## Splitting frames
+
+```python
+train, valid, test = frame.split_frame(ratios=[0.7, 0.15], seed=42)
+```
+
+Split the frame into two or more parts. The last part receives the remainder. The `seed` parameter controls reproducibility.
+
+<ParamField path="ratios" type="float[]">
+  Fractions for each split. Must sum to less than 1.0.
+</ParamField>
+
+<ParamField path="seed" type="integer">
+  Random seed for reproducibility.
+</ParamField>

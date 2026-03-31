@@ -1,0 +1,235 @@
+---
+title: "GLM & GAM"
+description: "H2O-3's Generalized Linear Model (GLM) supports elastic net regularization across multiple distribution families. Generalized Additive Models (GAM) extend GLM with smooth spline functions."
+---
+
+## Generalized Linear Model (GLM)
+
+GLM estimates regression models for outcomes following exponential family distributions. In addition to Gaussian (normal) regression, GLM covers binomial (logistic), multinomial, Poisson, Gamma, Tweedie, and other distributions. H2O's GLM includes **elastic net regularization** (a combination of L1/lasso and L2/ridge penalties), making it effective for high-dimensional, sparse data.
+
+**MOJO Support:** GLM supports importing and exporting MOJOs.
+
+### Supported Distribution Families
+
+| Family | Response Type | Typical Use Case |
+|--------|---------------|-----------------|
+| `gaussian` | Numeric | Standard regression |
+| `binomial` | Binary (0/1) | Logistic regression / binary classification |
+| `quasibinomial` | Proportion [0,1] | Rates and proportions |
+| `fractional_binomial` | Fraction [0,1] | Bounded continuous outcomes |
+| `multinomial` | Multi-class | Multiclass classification |
+| `poisson` | Non-negative integer | Count data |
+| `gamma` | Positive numeric | Insurance claim severity, duration |
+| `tweedie` | Non-negative numeric | Mixed zero/positive outcomes (insurance) |
+| `negative_binomial` | Non-negative integer | Overdispersed count data |
+| `ordinal` | Ordered categories | Ordinal classification |
+
+---
+
+## Generalized Additive Model (GAM)
+
+GAM is a type of GLM where the linear predictor includes **smooth functions** of one or more predictor variables. H2O's GAM implementation is based on Simon N. Wood's "Generalized Additive Models: An Introduction with R." GAM is useful when the relationship between a predictor and the response is non-linear but you want interpretable, smooth curves rather than a black-box model.
+
+<Note>
+  GAM models are currently **experimental** in H2O-3. GAM inherits all GLM parameters and adds spline-specific controls.
+</Note>
+
+**MOJO Support:** GAM supports importing and exporting MOJOs.
+
+---
+
+## Key Parameters
+
+### GLM Parameters
+
+<ParamField path="family" type="str" default="auto">
+  Distribution family. One of: `"gaussian"`, `"binomial"`, `"quasibinomial"`, `"fractional_binomial"`, `"multinomial"`, `"poisson"`, `"gamma"`, `"tweedie"`, `"negative_binomial"`, `"ordinal"`. Set to `"auto"` to infer from the response column type.
+</ParamField>
+
+<ParamField path="alpha" type="List[float]" default="[0.5]">
+  Elastic net mixing parameter array. `alpha=0` gives ridge (L2-only), `alpha=1` gives lasso (L1-only). Values between 0 and 1 blend both penalties. Pass a list of values to perform a regularization path search.
+</ParamField>
+
+<ParamField path="lambda_" type="List[float]" default="(computed)">
+  Regularization strength. Larger values produce more regularization. If not specified, H2O computes a regularization path automatically. Enable `lambda_search=True` to search across a path of lambda values automatically.
+</ParamField>
+
+<ParamField path="lambda_search" type="bool" default="False">
+  When `True`, H2O performs a full regularization path search from `lambda_max` to `lambda_min`. Highly recommended when you don't know the right regularization strength.
+</ParamField>
+
+<ParamField path="solver" type="str" default="AUTO">
+  Optimization algorithm: `"AUTO"`, `"IRLSM"` (Iteratively Reweighted Least Squares, good for small/medium wide data), `"L_BFGS"` (large sparse), `"COORDINATE_DESCENT"` (multi-threaded CD, best for large data), `"COORDINATE_DESCENT_NAIVE"`, `"GRADIENT_DESCENT_LH"`, `"GRADIENT_DESCENT_SQERR"`.
+</ParamField>
+
+<ParamField path="standardize" type="bool" default="True">
+  Standardize numeric columns before fitting. Strongly recommended when using regularization so that coefficients are on a comparable scale.
+</ParamField>
+
+<ParamField path="remove_collinear_columns" type="bool" default="False">
+  Automatically drop collinear columns. Useful when multicollinearity would otherwise prevent convergence.
+</ParamField>
+
+<ParamField path="compute_p_values" type="bool" default="False">
+  Compute p-values and standard errors for coefficients. Only available for models without regularization (`lambda_=0`).
+</ParamField>
+
+<ParamField path="tweedie_variance_power" type="float" default="0.0">
+  (Only for `family="tweedie"`) The variance power p. Common values: `1.0` = Poisson, `1.5` = compound Poisson-Gamma, `2.0` = Gamma.
+</ParamField>
+
+### GAM Parameters
+
+<ParamField path="gam_columns" type="List[str]" required>
+  Column names to use as smoothing terms. GAM builds a spline smoother for each column listed. **Required** for GAM models.
+</ParamField>
+
+<ParamField path="bs" type="List[int]" default="[0]">
+  Spline type per GAM column: `0` = cubic regression spline (default), `1` = thin plate regression with knots, `2` = monotone I-splines, `3` = NBSplineTypeI M-splines.
+</ParamField>
+
+<ParamField path="num_knots" type="List[int]">
+  Number of knots for each GAM predictor listed in `gam_columns`. One value per column.
+</ParamField>
+
+<ParamField path="scale" type="List[float]">
+  Smoothing parameter for each GAM predictor. Must be the same length as `gam_columns`.
+</ParamField>
+
+---
+
+## Code Examples
+
+<CodeGroup>
+
+```python Python (GLM — Logistic Regression)
+import h2o
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [c for c in train.columns if c != y]
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+glm = H2OGeneralizedLinearEstimator(
+    family="binomial",
+    alpha=0.5,           # elastic net: mix of L1 and L2
+    lambda_search=True,  # search for best lambda automatically
+    standardize=True,
+    seed=42
+)
+glm.train(x=x, y=y, training_frame=train, validation_frame=test)
+
+# Coefficients
+print(glm.coef())
+print(glm.auc(valid=True))
+```
+
+```python Python (GLM — Regularization Path)
+glm_path = H2OGeneralizedLinearEstimator(
+    family="binomial",
+    alpha=[0.0, 0.25, 0.5, 0.75, 1.0],  # search across alpha values
+    lambda_search=True,
+    nlambdas=100,
+    standardize=True,
+)
+glm_path.train(x=x, y=y, training_frame=train)
+
+# Scoring history shows deviance vs lambda
+glm_path.scoring_history()
+```
+
+```python Python (GAM)
+from h2o.estimators.gam import H2OGeneralizedAdditiveEstimator
+
+gam = H2OGeneralizedAdditiveEstimator(
+    family="binomial",
+    gam_columns=["C1", "C2", "C3"],  # columns to smooth
+    bs=[0, 0, 0],                     # cubic splines for all
+    num_knots=[5, 5, 5],
+    lambda_=0.0,
+    alpha=0.0,
+    standardize=True,
+)
+gam.train(x=x, y=y, training_frame=train)
+```
+
+```r R (GLM)
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+glm <- h2o.glm(
+  x = x, y = y,
+  training_frame = train,
+  validation_frame = test,
+  family = "binomial",
+  alpha = 0.5,
+  lambda_search = TRUE,
+  standardize = TRUE,
+  seed = 42
+)
+
+# Coefficients
+h2o.coef(glm)
+h2o.auc(glm, valid = TRUE)
+```
+
+```r R (GAM)
+library(h2o)
+h2o.init()
+
+gam <- h2o.gam(
+  x = x, y = y,
+  training_frame = train,
+  family = "binomial",
+  gam_columns = c("C1", "C2", "C3"),
+  bs = c(0, 0, 0),
+  num_knots = c(5, 5, 5),
+  lambda = 0,
+  alpha = 0,
+  standardize = TRUE
+)
+```
+
+</CodeGroup>
+
+---
+
+## Regularization Paths
+
+GLM supports full elastic net regularization paths. The path runs from a fully regularized model (all coefficients zero) to the least regularized model, selecting the optimal lambda via cross-validation or a validation frame.
+
+```python Python
+# Enable lambda search to automatically find optimal regularization
+glm = H2OGeneralizedLinearEstimator(
+    family="binomial",
+    alpha=0.5,
+    lambda_search=True,
+    nlambdas=100,          # number of lambda values to try
+    lambda_min_ratio=1e-4, # ratio of smallest to largest lambda
+)
+glm.train(x=x, y=y, training_frame=train)
+
+# Optimal lambda selected
+print("Best lambda:", glm.actual_params["lambda"])
+
+# Full scoring history across the regularization path
+sh = glm.scoring_history()
+```
+
+<Tip>
+  For high-dimensional data (many predictors), use `alpha=1.0` (lasso) with `lambda_search=True` for automatic feature selection — coefficients for irrelevant features are driven to exactly zero. For highly correlated features, `alpha=0.0` (ridge) or an intermediate `alpha` value often works better.
+</Tip>

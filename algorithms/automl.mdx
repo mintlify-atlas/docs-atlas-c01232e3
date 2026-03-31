@@ -1,0 +1,218 @@
+---
+title: "AutoML"
+description: "H2O AutoML automatically trains and tunes a large selection of candidate models within a user-specified time or model limit, then ranks them on a leaderboard."
+---
+
+H2O's AutoML automates the supervised machine learning workflow. It trains several models — cross-validated by default — across the following algorithms: **XGBoost**, **GBM**, **GLM**, **DRF**, **XRT** (Extremely Randomized Trees), and **Deep Learning**. It also applies hyperparameter optimization on XGBoost, GBM, and Deep Learning, and finally trains multiple **Stacked Ensemble** models on top of the best base learners.
+
+<Note>
+  AutoML is available in Python (`H2OAutoML`), R (`h2o.automl()`), and the H2O Flow web UI.
+</Note>
+
+---
+
+## How AutoML Works
+
+<Steps>
+  <Step title="Data ingestion">
+    Point AutoML at a training frame and identify the response column. Everything else is optional.
+  </Step>
+  <Step title="Model training">
+    AutoML sequentially trains individual models (GLM, GBM, XGBoost, DRF, XRT, Deep Learning) and performs random grid searches with hyperparameter optimization for the strongest algorithms.
+  </Step>
+  <Step title="Stacked Ensembles">
+    After base model training, AutoML builds two Stacked Ensemble models: one using all base models and one using only the best model from each algorithm family.
+  </Step>
+  <Step title="Leaderboard ranking">
+    All models are ranked on the leaderboard by cross-validation AUC (binary), mean per-class error (multinomial), or deviance (regression) — or by a custom `sort_metric` you specify.
+  </Step>
+</Steps>
+
+---
+
+## Parameters
+
+### Required Parameters
+
+<ParamField path="y" type="str" required>
+  The name (or index) of the response column. For binary classification, this column must be a factor.
+</ParamField>
+
+<ParamField path="training_frame" type="H2OFrame" required>
+  The dataset used to build the models. At least one of `max_runtime_secs` or `max_models` must also be set (or AutoML defaults to 1 hour).
+</ParamField>
+
+<ParamField path="max_runtime_secs" type="int" default="3600">
+  Maximum wall-clock time (seconds) for the entire AutoML run. Dynamically defaults to 3600 if neither `max_runtime_secs` nor `max_models` is specified.
+</ParamField>
+
+<ParamField path="max_models" type="int" default="None">
+  Maximum number of models to train (excluding Stacked Ensembles). Set this for reproducible runs — all models are then trained to convergence rather than being cut off by a time budget.
+</ParamField>
+
+### Key Optional Parameters
+
+<ParamField path="nfolds" type="int" default="-1">
+  Number of cross-validation folds. `-1` lets AutoML decide (typically 5-fold CV or blending mode depending on data size). Set to `0` to disable CV (also disables Stacked Ensembles).
+</ParamField>
+
+<ParamField path="seed" type="int" default="None">
+  Random seed for reproducibility. Reproducibility requires using `max_models` (not `max_runtime_secs`) and excluding `DeepLearning` (which is non-deterministic by default).
+</ParamField>
+
+<ParamField path="exclude_algos" type="List[str]" default="None">
+  List of algorithms to skip. Mutually exclusive with `include_algos`. Example: `["GLM", "DeepLearning"]`. Available values: `"DRF"`, `"GLM"`, `"XGBoost"`, `"GBM"`, `"DeepLearning"`, `"StackedEnsemble"`.
+</ParamField>
+
+<ParamField path="include_algos" type="List[str]" default="None">
+  Allowlist of algorithms. Mutually exclusive with `exclude_algos`. Same values as above.
+</ParamField>
+
+<ParamField path="sort_metric" type="str" default="AUTO">
+  Metric used to rank the leaderboard. `AUTO` defaults to `AUC` for binary, `mean_per_class_error` for multinomial, and `deviance` for regression. Other options: `"logloss"`, `"MSE"`, `"RMSE"`, `"MAE"`.
+</ParamField>
+
+<ParamField path="verbosity" type="str" default="warn">
+  Backend logging verbosity. One of `"debug"`, `"info"`, `"warn"`. Set to `"info"` to see per-model progress during training.
+</ParamField>
+
+---
+
+## Code Examples
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.automl import H2OAutoML
+
+h2o.init()
+
+# Load data
+train = h2o.import_file("https://s3.amazonaws.com/erin-data/higgs/higgs_train_10k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/erin-data/higgs/higgs_test_5k.csv")
+
+# Response column must be a factor for classification
+y = "response"
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+x = [col for col in train.columns if col != y]
+
+# Run AutoML for up to 30 seconds
+aml = H2OAutoML(max_runtime_secs=30, seed=42)
+aml.train(x=x, y=y, training_frame=train)
+
+# View the leaderboard
+lb = aml.leaderboard
+lb.head(rows=lb.nrows)  # print full leaderboard
+
+# Evaluate the leader model
+perf = aml.leader.model_performance(test)
+print(perf.auc())
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Load data
+train <- h2o.importFile("https://s3.amazonaws.com/erin-data/higgs/higgs_train_10k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/erin-data/higgs/higgs_test_5k.csv")
+
+y <- "response"
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+x <- setdiff(names(train), y)
+
+# Run AutoML for up to 30 seconds
+aml <- h2o.automl(
+  x = x, y = y,
+  training_frame = train,
+  max_runtime_secs = 30,
+  seed = 42
+)
+
+# View leaderboard
+lb <- aml@leaderboard
+print(lb, n = nrow(lb))
+
+# Evaluate leader
+perf <- h2o.performance(aml@leader, test)
+h2o.auc(perf)
+```
+
+</CodeGroup>
+
+---
+
+## Accessing and Interpreting the Leaderboard
+
+The leaderboard is an `H2OFrame` sorted by the `sort_metric`. Each row represents one trained model.
+
+```python Python
+# Full leaderboard
+lb = aml.leaderboard
+lb.head(rows=lb.nrows)
+
+# Get the best model
+best_model = aml.leader
+
+# Get a specific model by ID
+m = h2o.get_model(lb["model_id"][2, 0])
+```
+
+```r R
+# Full leaderboard
+lb <- aml@leaderboard
+print(lb, n = nrow(lb))
+
+# Leader
+leader <- aml@leader
+
+# Get model by ID
+m <- h2o.getModel(as.character(lb[3, "model_id"]))
+```
+
+<Tip>
+  Stacked Ensemble models typically appear at the top of the leaderboard. If you need a single interpretable model, look for the best `GLM` entry or the best `GBM`/`XGBoost` entry — accessible via `aml.get_best_model(algorithm="glm")`.
+</Tip>
+
+### Getting the Best Model by Algorithm
+
+```python Python
+# Best model overall
+best = aml.leader
+
+# Best model of a specific algorithm
+best_gbm = aml.get_best_model(algorithm="gbm")
+best_xgb = aml.get_best_model(algorithm="xgboost")
+best_glm = aml.get_best_model(algorithm="glm")
+```
+
+---
+
+## Explainability
+
+H2O AutoML integrates with H2O's explainability framework. Call `explain()` on the AutoML object to generate an automated report covering variable importance, SHAP values, partial dependence plots, and model correlation.
+
+```python Python
+# Explain all AutoML models on the test set
+exa = aml.explain(test)
+
+# Explain only the leader model
+exm = aml.leader.explain(test)
+```
+
+```r R
+# Explain AutoML results
+exa <- h2o.explain(aml, test)
+
+# Explain leader model
+exm <- h2o.explain(aml@leader, test)
+```
+
+<Note>
+  `explain()` returns an object with individual plots (variable importance heatmap, model correlation heatmap, SHAP summary, PDP/ICE plots). In a Jupyter notebook, plots render inline automatically.
+</Note>

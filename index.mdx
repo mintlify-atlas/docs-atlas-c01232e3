@@ -1,97 +1,123 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "H2O-3: Open Source Machine Learning Platform"
+description: "Distributed, in-memory machine learning for Python, R, and the web. Train models at scale with AutoML, GBM, XGBoost, Deep Learning, and more."
 ---
 
-## Setting up
+H2O-3 is an open-source, distributed machine learning platform that makes it easy to train, tune, and deploy models at scale. It supports Python, R, Java, Scala, and a web-based Flow UI — and runs seamlessly on Hadoop, Spark, Kubernetes, and standalone clusters.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a model trained in under 5 minutes with Python or R
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Installation" icon="download" href="/installation">
+    Install H2O-3 via pip, CRAN, or download the standalone jar
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="AutoML" icon="wand-magic-sparkles" href="/algorithms/automl">
+    Automatically train and rank hundreds of models with a single call
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Algorithm Reference" icon="brain" href="/algorithms/overview">
+    GBM, XGBoost, Random Forest, Deep Learning, GLM, GAM, and more
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What you can do with H2O-3
 
-Everything you need to create world-class documentation.
+<CardGroup cols={3}>
+  <Card title="AutoML" icon="robot" href="/algorithms/automl">
+    Automatically trains and ranks models — no ML expertise required
+  </Card>
+  <Card title="Distributed Training" icon="server" href="/concepts/architecture">
+    Scale across a cluster using in-memory distributed computing
+  </Card>
+  <Card title="Model Explainability" icon="chart-bar" href="/workflows/explainability">
+    SHAP values, PDP plots, variable importance — built in
+  </Card>
+  <Card title="MOJO Deployment" icon="box" href="/deployment/mojo-pojo">
+    Export models as MOJO or POJO for fast, dependency-free scoring
+  </Card>
+  <Card title="Flow Web UI" icon="display" href="/concepts/architecture">
+    Interactive notebook-style UI for data exploration and modeling
+  </Card>
+  <Card title="Multi-language API" icon="code" href="/api/python/h2o-module">
+    Consistent API across Python, R, and REST
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Get up and running
 
-## Need inspiration?
+<Steps>
+  <Step title="Install H2O-3">
+    Install the Python package from PyPI or the R package from CRAN.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    <CodeGroup>
+    ```bash Python
+    pip install h2o
+    ```
+    ```r R
+    install.packages("h2o")
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Start the H2O cluster">
+    Initialize H2O — this starts a local cluster in-process.
+
+    <CodeGroup>
+    ```python Python
+    import h2o
+    h2o.init()
+    ```
+    ```r R
+    library(h2o)
+    h2o.init()
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Load data and train a model">
+    Import a dataset and train your first model.
+
+    <CodeGroup>
+    ```python Python
+    df = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+    from h2o.estimators import H2OGradientBoostingEstimator
+    model = H2OGradientBoostingEstimator()
+    model.train(y="class", training_frame=df)
+    ```
+    ```r R
+    df <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+    model <- h2o.gbm(y = "class", training_frame = df)
+    ```
+    </CodeGroup>
+  </Step>
+  <Step title="Make predictions">
+    Score new data and export your model for production.
+
+    <CodeGroup>
+    ```python Python
+    predictions = model.predict(df)
+    model.download_mojo(path="./")
+    ```
+    ```r R
+    predictions <- h2o.predict(model, df)
+    h2o.download_mojo(model, path = "./")
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Supported algorithms
+
+H2O-3 includes production-ready implementations of the most widely used ML algorithms:
+
+| Algorithm | Best for |
+|-----------|----------|
+| [GBM / XGBoost](/algorithms/gbm-xgboost) | Tabular regression & classification |
+| [Random Forest](/algorithms/random-forest) | Robust baseline, interpretable |
+| [Deep Learning](/algorithms/deep-learning) | Complex patterns, multi-layer networks |
+| [GLM / GAM](/algorithms/glm-gam) | Interpretable linear & additive models |
+| [AutoML](/algorithms/automl) | Automatic model selection & tuning |
+| [Stacked Ensembles](/algorithms/stacked-ensembles) | Combining multiple models |
+| [K-Means / PCA](/algorithms/clustering-dimensionality) | Clustering & dimensionality reduction |
+
+<Note>
+  H2O-3 is Apache 2.0 licensed. Source code, issue tracking, and community discussion are on [GitHub](https://github.com/h2oai/h2o-3).
+</Note>

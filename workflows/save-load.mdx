@@ -1,0 +1,365 @@
+---
+title: "Saving & Loading Models"
+description: "Save and load H2O-3 binary models and MOJOs to local disk, HDFS, S3, GCS, and other storage backends. Learn about model checkpointing and the download/upload workflow."
+---
+
+H2O-3 provides several functions for persisting trained models. The right approach depends on whether you need the model for continued H2O use (binary model) or for production scoring without an H2O cluster (MOJO).
+
+## Binary models
+
+A binary model saves the full H2O model object, including all internal state. Binary models are **version-specific**: a model saved with H2O version X can only be loaded with the same version X.
+
+<Warning>Binary models are not compatible across H2O versions. If you upgrade H2O, you must retrain and re-save your models. For production deployment, use MOJO or POJO format instead.</Warning>
+
+### Saving and loading locally
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators import H2ODeepLearningEstimator
+h2o.init()
+
+# Train a model
+model = H2ODeepLearningEstimator()
+model.train(params)
+
+# Save to /tmp/mymodel/
+model_path = h2o.save_model(model=model, path="/tmp/mymodel", force=True)
+print(model_path)
+# /tmp/mymodel/DeepLearning_model_python_1441838096933
+
+# Load the saved model
+saved_model = h2o.load_model(model_path)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Train a model
+model <- h2o.deeplearning(params)
+
+# Save to the current working directory
+model_path <- h2o.saveModel(object = model, path = getwd(), force = TRUE)
+print(model_path)
+# /tmp/mymodel/DeepLearning_model_R_1441838096933
+
+# Load the saved model
+saved_model <- h2o.loadModel(model_path)
+```
+
+</CodeGroup>
+
+### h2o.save_model() parameters
+
+| Parameter | Description |
+|---|---|
+| `model` | The H2O model object to save. |
+| `path` | Directory path to save to. Supports local paths, `hdfs://`, `s3://`, and `gs://`. Defaults to the current working directory. |
+| `force` | If `True`, overwrite existing files at the destination. |
+| `export_cross_validation_predictions` | If `True`, include CV holdout predictions in the saved artifact. |
+| `filename` | Custom filename for the saved model. Defaults to `model.model_id`. |
+
+### Downloading and uploading models
+
+Use `download_model()` and `upload_model()` when the H2O cluster is remote and you need to transfer model files to or from the local machine running your Python/R session.
+
+<CodeGroup>
+
+```python Python
+# Download model from the H2O cluster to your local machine
+my_local_model = h2o.download_model(model, path="/Users/UserName/Desktop")
+
+# Upload a previously downloaded model back to the H2O cluster
+uploaded_model = h2o.upload_model(my_local_model)
+```
+
+```r R
+# Download model from the H2O cluster to your local machine
+my_local_model <- h2o.download_model(model, path = "/Users/UserName/Desktop")
+
+# Upload a previously downloaded model back to the H2O cluster
+uploaded_model <- h2o.upload_model(my_local_model)
+```
+
+</CodeGroup>
+
+<Note>The owner of a **saved** file (via `save_model`) is the user running the H2O cluster process. The owner of a **downloaded** file (via `download_model`) is the user running the Python/R session.</Note>
+
+## Saving to cloud storage
+
+Prefix the path with the appropriate URI scheme to save directly to distributed storage.
+
+<Tabs>
+  <Tab title="HDFS">
+    <CodeGroup>
+
+    ```python Python
+    hdfs_name_node = "node-1"
+    hdfs_model_path = "hdfs://" + hdfs_name_node + "/tmp/models"
+    new_model_path = h2o.save_model(h2o_glm, hdfs_model_path)
+    ```
+
+    ```r R
+    hdfs_name_node <- "node-1"
+    hdfs_tmp_dir <- "/tmp/runit"
+    model_path <- sprintf("hdfs://%s%s", hdfs_name_node, hdfs_tmp_dir)
+    h2o.saveModel(model, path = model_path, name = "mymodel")
+    ```
+
+    </CodeGroup>
+  </Tab>
+  <Tab title="S3">
+    <CodeGroup>
+
+    ```python Python
+    s3_path = "s3://my-bucket/models/"
+    model_path = h2o.save_model(model=model, path=s3_path, force=True)
+    saved_model = h2o.load_model(model_path)
+    ```
+
+    ```r R
+    s3_path <- "s3://my-bucket/models/"
+    model_path <- h2o.saveModel(object = model, path = s3_path, force = TRUE)
+    saved_model <- h2o.loadModel(model_path)
+    ```
+
+    </CodeGroup>
+  </Tab>
+  <Tab title="GCS">
+    <CodeGroup>
+
+    ```python Python
+    gcs_path = "gs://my-bucket/models/"
+    model_path = h2o.save_model(model=model, path=gcs_path, force=True)
+    saved_model = h2o.load_model(model_path)
+    ```
+
+    ```r R
+    gcs_path <- "gs://my-bucket/models/"
+    model_path <- h2o.saveModel(object = model, path = gcs_path, force = TRUE)
+    saved_model <- h2o.loadModel(model_path)
+    ```
+
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## MOJO models
+
+A MOJO (Model Object, Optimized) is a portable, self-contained model archive. Unlike binary models, MOJOs:
+
+- Do **not** require an H2O cluster to score
+- Are **not** tied to a specific H2O version
+- Can be deployed in Java environments via the `h2o-genmodel` library
+
+<Tip>Use MOJOs for production deployment. They are more compact and faster than POJOs, and support the widest range of algorithms.</Tip>
+
+### Supported algorithms
+
+The following algorithms support MOJO export and/or import:
+
+| Algorithm | Exportable | Importable |
+|---|---|---|
+| GBM | Yes | Yes |
+| DRF | Yes | Yes |
+| GLM | Yes | Yes |
+| XGBoost | Yes | Yes |
+| Deep Learning | Yes | Yes |
+| Stacked Ensemble | Yes | Yes |
+| AutoML | Yes | Yes |
+| GAM | Yes | Yes |
+| CoxPH | Yes | Yes |
+| RuleFit | Yes | Yes |
+| Uplift DRF | Yes | Yes |
+| Isolation Forest | Yes | Yes |
+| Extended Isolation Forest | Yes | Yes |
+| GLRM | Yes | No |
+| PCA | Yes | No |
+| K-Means | Yes | No |
+| Naïve Bayes | No | No |
+| SVM | No | No |
+
+<Note>AutoML will always produce a model with a MOJO, though the exact model type depends on the run. In most cases you will get a Stacked Ensemble. All individual models within an AutoML run are importable, but only individual (non-AutoML) models are exportable as MOJOs.</Note>
+
+### Saving and importing MOJOs
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+h2o.init()
+
+data = h2o.import_file(path='training_dataset.csv')
+original_model = H2OGeneralizedLinearEstimator()
+original_model.train(
+    x=["Some column", "Another column"],
+    y="response",
+    training_frame=data
+)
+
+# Save as MOJO
+path = '/path/to/model/directory/model.zip'
+original_model.save_mojo(path)
+
+# Import the MOJO back into H2O for scoring
+imported_model = h2o.import_mojo(path)
+new_observations = h2o.import_file(path='new_observations.csv')
+predictions = imported_model.predict(new_observations)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+data <- h2o.importFile(path = 'training_dataset.csv')
+cols <- c("Some column", "Another column")
+original_model <- h2o.glm(x = cols, y = "response", training_frame = data)
+
+# Save as MOJO
+path <- "/path/to/model/directory"
+mojo_destination <- h2o.save_mojo(original_model, path = path)
+
+# Import the MOJO back into H2O for scoring
+imported_model <- h2o.import_mojo(mojo_destination)
+new_observations <- h2o.importFile(path = 'new_observations.csv')
+h2o.predict(imported_model, new_observations)
+```
+
+</CodeGroup>
+
+### Downloading and uploading MOJOs
+
+Use `download_mojo()` and `upload_mojo()` when the H2O cluster is remote.
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators import H2OGradientBoostingEstimator
+h2o.init()
+
+df = h2o.import_file("http://h2o-public-test-data.s3.amazonaws.com/smalldata/iris/iris_wheader.csv")
+model = H2OGradientBoostingEstimator()
+model.train(x=list(range(4)), y="class", training_frame=df)
+
+# Download MOJO to local machine
+my_mojo = model.download_mojo(path="/Users/UserName/Desktop")
+
+# Upload the MOJO to the H2O cluster
+mojo_model = h2o.upload_mojo(my_mojo)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+fr <- as.h2o(iris)
+my_model <- h2o.gbm(x = 1:4, y = 5, training_frame = fr)
+
+# Download MOJO to local machine
+my_mojo <- h2o.download_mojo(my_model, "/Users/UserName/Desktop")
+
+# Upload the MOJO to the H2O cluster
+mojo_model <- h2o.upload_mojo(my_mojo)
+```
+
+</CodeGroup>
+
+## Model checkpointing
+
+Several H2O-3 algorithms (GBM, DRF, Deep Learning, XGBoost) support **checkpointing**: resuming training from a previously saved model. Pass the `checkpoint` parameter with the model ID of an existing model.
+
+<CodeGroup>
+
+```python Python
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+# Initial training run (50 trees)
+gbm_v1 = H2OGradientBoostingEstimator(ntrees=50, seed=42)
+gbm_v1.train(x=predictors, y=response, training_frame=train)
+
+# Save the model
+model_path = h2o.save_model(gbm_v1, path="/tmp/checkpoints", force=True)
+
+# Resume training from the checkpoint (add 50 more trees)
+gbm_v2 = H2OGradientBoostingEstimator(
+    ntrees=100,           # total trees including the checkpoint
+    checkpoint=gbm_v1.model_id,
+    seed=42
+)
+gbm_v2.train(x=predictors, y=response, training_frame=train)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Initial training run (50 trees)
+gbm_v1 <- h2o.gbm(x = predictors,
+                  y = response,
+                  training_frame = train,
+                  ntrees = 50,
+                  seed = 42)
+
+# Save the model
+model_path <- h2o.saveModel(gbm_v1, path = "/tmp/checkpoints", force = TRUE)
+
+# Resume training from the checkpoint (add 50 more trees)
+gbm_v2 <- h2o.gbm(x = predictors,
+                  y = response,
+                  training_frame = train,
+                  ntrees = 100,          # total trees including the checkpoint
+                  checkpoint = gbm_v1@model_id,
+                  seed = 42)
+```
+
+</CodeGroup>
+
+<Tip>Checkpointing is useful for incrementally training large models without restarting from scratch, or for fine-tuning a base model on new data.</Tip>
+
+## Advanced: lazy MOJO import with Generic model
+
+The Generic model provides fine-grained control over MOJO loading. Upload the MOJO bytes once and instantiate multiple scored models from the same upload without re-uploading.
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init()
+
+# Download MOJO from original model
+path = '/path/to/model/directory/model.zip'
+original_model.download_mojo(path)
+
+# Upload MOJO bytes once (lazy import)
+imported_mojo_key = h2o.lazy_import(path)
+
+# Build the generic model from already-uploaded bytes
+from h2o.estimators import H2OGenericEstimator
+generic_model = H2OGenericEstimator(
+    model_key=h2o.get_frame(imported_mojo_key[0])
+)
+new_observations = h2o.import_file(path='new_observations.csv')
+predictions = generic_model.predict(new_observations)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Download MOJO from original model
+mojo_destination <- h2o.download_mojo(model = original_model, path = path)
+
+# Upload MOJO bytes once (lazy import — does not initialize the generic model yet)
+imported_mojo_key <- h2o.importFile(mojo_destination, parse = FALSE)
+
+# Build the generic model from already-uploaded bytes
+generic_model <- h2o.generic(model_key = imported_mojo_key)
+new_observations <- h2o.importFile(path = 'new_observations.csv')
+h2o.predict(generic_model, new_observations)
+```
+
+</CodeGroup>

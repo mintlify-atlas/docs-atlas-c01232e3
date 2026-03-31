@@ -1,0 +1,313 @@
+---
+title: "MOJO & POJO Export"
+description: "Export trained H2O models as MOJO or POJO artifacts for dependency-free Java scoring in production."
+keywords: ["MOJO", "POJO", "model export", "scoring", "h2o-genmodel", "production deployment"]
+---
+
+H2O lets you export trained models as self-contained artifacts that score data without requiring a running H2O cluster. Two formats are available: MOJO and POJO.
+
+## What is a MOJO?
+
+A **MOJO** (Model OBject, Optimized) is a binary zip archive that contains the model's parameters and tree structures in a compact, optimized format. MOJOs are read at runtime by generic tree-walking code in `h2o-genmodel.jar`, so they have no size restriction and no compilation step.
+
+**Supported algorithms**: GBM, DRF, GLM, GAM, GLRM, Deep Learning, K-Means, PCA, Stacked Ensembles, SVM, Word2Vec, Isolation Forest, XGBoost, CoxPH, RuleFit, and all AutoML-generated models.
+
+<Note>
+MOJOs are only supported for encodings that are either default or `enum`. MOJO predict cannot parse columns enclosed in double quotes (for example, `"2"`).
+</Note>
+
+## What is a POJO?
+
+A **POJO** (Plain Old Java Object) is generated Java source code that embeds the model's logic directly. The generated class extends `GenModel` from `h2o-genmodel.jar` and can be compiled and loaded into any JVM without any H2O dependency beyond that jar.
+
+**Limitations**: POJOs are not supported for source files larger than 1 GB. They are also not available for GLRM, Stacked Ensembles, or Word2Vec models.
+
+## When to use each
+
+| | MOJO | POJO |
+|---|---|---|
+| Size restriction | None | Max ~1 GB source |
+| Compilation required | No | Yes (`javac`) |
+| Cold scoring speed | 10–40× faster than POJO | Slower on first JVM run |
+| Hot scoring speed | 2–3× faster than POJO | ≈10% faster for small binomial/regression models |
+| Algorithm support | Broader (includes ensembles) | Narrower |
+| Format | Binary `.zip` | Java `.java` source file |
+
+For new deployments, prefer MOJO unless you have a specific reason to require source-level transparency.
+
+## The `h2o-genmodel.jar` dependency
+
+Both formats require `h2o-genmodel.jar` at compile time and runtime. This jar is the only external dependency needed to score in production — no H2O cluster, no Hadoop, no network.
+
+Download it from a running H2O instance:
+
+```bash
+curl http://localhost:54321/3/h2o-genmodel.jar > h2o-genmodel.jar
+```
+
+For XGBoost MOJOs, also add `h2o-genmodel-ext-xgboost`:
+
+```xml Maven pom.xml
+<dependency>
+    <groupId>ai.h2o</groupId>
+    <artifactId>h2o-genmodel-ext-xgboost</artifactId>
+    <version>3.x.x.x</version>
+</dependency>
+<dependency>
+    <groupId>ai.h2o</groupId>
+    <artifactId>h2o-genmodel</artifactId>
+    <version>3.x.x.x</version>
+</dependency>
+```
+
+---
+
+## Downloading a MOJO
+
+<Steps>
+  <Step title="Train a model">
+    Train any supported model in Python or R.
+
+    <CodeGroup>
+
+    ```python Python
+    import h2o
+    from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+    h2o.init()
+    h2o_df = h2o.load_dataset("prostate.csv")
+    h2o_df["CAPSULE"] = h2o_df["CAPSULE"].asfactor()
+
+    model = H2OGradientBoostingEstimator(
+        distribution="bernoulli",
+        ntrees=100,
+        max_depth=4,
+        learn_rate=0.1
+    )
+    model.train(
+        y="CAPSULE",
+        x=["AGE", "RACE", "PSA", "GLEASON"],
+        training_frame=h2o_df
+    )
+    ```
+
+    ```r R
+    library(h2o)
+    h2o.init(nthreads = -1)
+    path <- system.file("extdata", "prostate.csv", package = "h2o")
+    h2o_df <- h2o.importFile(path)
+    h2o_df$CAPSULE <- as.factor(h2o_df$CAPSULE)
+    model <- h2o.gbm(
+        y = "CAPSULE",
+        x = c("AGE", "RACE", "PSA", "GLEASON"),
+        training_frame = h2o_df,
+        distribution = "bernoulli",
+        ntrees = 100,
+        max_depth = 4,
+        learn_rate = 0.1
+    )
+    ```
+
+    </CodeGroup>
+  </Step>
+
+  <Step title="Download the MOJO and genmodel jar">
+    Use the full absolute path — relative paths are not reliable here.
+
+    <CodeGroup>
+
+    ```python Python
+    modelfile = model.download_mojo(path="~/experiment/", get_genmodel_jar=True)
+    print("Model saved to " + modelfile)
+    # Model saved to /Users/user/GBM_model_python_1475248925871_888.zip
+    ```
+
+    ```r R
+    modelfile <- h2o.download_mojo(model, path="~/experiments/", get_genmodel_jar=TRUE)
+    print(paste("Model saved to", modelfile))
+    ```
+
+    </CodeGroup>
+
+    The `get_genmodel_jar=True` flag downloads `h2o-genmodel.jar` into the same directory.
+  </Step>
+</Steps>
+
+---
+
+## Downloading a POJO
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+
+h2o.init()
+h2o_df = h2o.import_file(
+    "http://s3.amazonaws.com/h2o-public-test-data/smalldata/prostate/prostate.csv.zip"
+)
+h2o_df["CAPSULE"] = h2o_df["CAPSULE"].asfactor()
+
+model = H2OGeneralizedLinearEstimator(family="binomial")
+model.train(
+    y="CAPSULE",
+    x=["AGE", "RACE", "PSA", "GLEASON"],
+    training_frame=h2o_df
+)
+
+h2o.download_pojo(model)
+```
+
+```r R
+library(h2o)
+h2o.init()
+path <- system.file("extdata", "prostate.csv", package = "h2o")
+h2o_df <- h2o.importFile(path)
+h2o_df$CAPSULE <- as.factor(h2o_df$CAPSULE)
+model <- h2o.glm(
+    y = "CAPSULE",
+    x = c("AGE", "RACE", "PSA", "GLEASON"),
+    training_frame = h2o_df,
+    family = "binomial"
+)
+h2o.download_pojo(model)
+```
+
+</CodeGroup>
+
+You can also click **Download POJO** on any model card in the H2O Flow web UI at `http://localhost:54321`.
+
+---
+
+## Scoring with a MOJO in Java
+
+<Steps>
+  <Step title="Write the scoring program">
+    Create `main.java` in your experiment directory:
+
+    ```java main.java
+    import java.io.*;
+    import hex.genmodel.easy.RowData;
+    import hex.genmodel.easy.EasyPredictModelWrapper;
+    import hex.genmodel.easy.prediction.*;
+    import hex.genmodel.MojoModel;
+
+    public class main {
+      public static void main(String[] args) throws Exception {
+        EasyPredictModelWrapper model = new EasyPredictModelWrapper(
+            MojoModel.load("GBM_model_R_1475248925871_74.zip")
+        );
+
+        RowData row = new RowData();
+        row.put("AGE", "68");
+        row.put("RACE", "2");
+        row.put("DCAPS", "2");
+        row.put("VOL", "0");
+        row.put("GLEASON", "6");
+
+        BinomialModelPrediction p = model.predictBinomial(row);
+        System.out.println("Prediction: " + p.label);
+        for (int i = 0; i < p.classProbabilities.length; i++) {
+          if (i > 0) System.out.print(",");
+          System.out.print(p.classProbabilities[i]);
+        }
+        System.out.println();
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Compile">
+    ```bash
+    javac -cp h2o-genmodel.jar -J-Xms2g -J-XX:MaxPermSize=128m main.java
+    ```
+  </Step>
+
+  <Step title="Run">
+    <CodeGroup>
+
+    ```bash Linux / macOS
+    java -cp .:h2o-genmodel.jar main
+    ```
+
+    ```bash Windows
+    java -cp .;h2o-genmodel.jar main
+    ```
+
+    </CodeGroup>
+
+    Expected output:
+    ```
+    Prediction: 0
+    Class probabilities: 0.8059929056296662,0.19400709437033375
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+To enable Shapley contributions or leaf node assignments, configure `EasyPredictModelWrapper` with a `Config` object:
+
+```java
+EasyPredictModelWrapper.Config config = new EasyPredictModelWrapper.Config()
+    .setModel(MojoModel.load("model.zip"))
+    .setEnableLeafAssignment(true)
+    .setEnableContributions(true);
+EasyPredictModelWrapper model = new EasyPredictModelWrapper(config);
+```
+
+These features add computation time.
+</Tip>
+
+---
+
+## Scoring with a MOJO from the command line
+
+Use `PrintMojo` to convert a MOJO to a human-readable graph (requires Graphviz):
+
+```bash
+# Download h2o.jar from https://www.h2o.ai/download/
+java -cp h2o.jar hex.genmodel.tools.PrintMojo \
+    --tree 0 \
+    -i path/to/model.zip \
+    -o model.gv \
+    -f 20 \
+    -d 3
+dot -Tpng model.gv -o model.png
+```
+
+To produce a PNG directly without Graphviz (requires Java 8+):
+
+```bash
+java -cp h2o-genmodel.jar hex.genmodel.tools.PrintMojo \
+    --tree 0 \
+    -i path/to/model.zip \
+    -o tree.png \
+    --format png
+```
+
+---
+
+## Frequently asked questions
+
+<AccordionGroup>
+  <Accordion title="Are MOJOs and POJOs thread safe?">
+    Yes. Both MOJOs and POJOs are fully thread safe and can be shared across threads.
+  </Accordion>
+
+  <Accordion title="Can I use a POJO on a Spark cluster?">
+    Yes. The POJO contains only scoring math with no Spark or H2O dependencies. Use it inside a Spark `map` that calls the POJO's predict method for each row and writes the result to a new column.
+  </Accordion>
+
+  <Accordion title="Can I convert a MOJO to ONNX?">
+    A subset of MOJOs can be converted using the `onnxmltools` Python package. Currently only GBM models are supported, and poisson/gamma/tweedie distributions and categorical splits are not supported. See the [onnxmltools project](https://github.com/onnx/onnxmltools) for examples.
+  </Accordion>
+
+  <Accordion title="Why does POJO compilation fail with an IllegalArgumentException?">
+    This happens when the generated `.java` source file exceeds 1 GB. Switch to MOJO format, which has no size restriction.
+  </Accordion>
+
+  <Accordion title="Does H2O MOJO have a C++ runtime?">
+    GBM has a C++ runtime with a C# wrapper for .NET, but this is not part of the open-source offering and requires a support contract.
+  </Accordion>
+</AccordionGroup>

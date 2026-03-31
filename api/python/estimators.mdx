@@ -1,0 +1,333 @@
+---
+title: "Estimators"
+description: "Overview of H2O estimators (model algorithms) and the common training API shared by all estimators."
+---
+
+All H2O supervised and unsupervised algorithms are implemented as estimator classes that extend `H2OEstimator`. Every estimator follows the same pattern: instantiate with hyperparameters, then call `train()` with a dataset.
+
+```python
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+model = H2OGradientBoostingEstimator(ntrees=100, max_depth=5, learn_rate=0.1)
+model.train(x=predictors, y=response, training_frame=train)
+```
+
+---
+
+## Available estimators
+
+<Columns cols={2}>
+  <Card title="H2OGradientBoostingEstimator" icon="tree">
+    Gradient Boosting Machine (GBM). Supports regression and classification.
+
+    ```python
+    from h2o.estimators.gbm import H2OGradientBoostingEstimator
+    ```
+  </Card>
+  <Card title="H2OXGBoostEstimator" icon="bolt">
+    XGBoost integration. Requires the XGBoost extension.
+
+    ```python
+    from h2o.estimators.xgboost import H2OXGBoostEstimator
+    ```
+  </Card>
+  <Card title="H2ORandomForestEstimator" icon="tree">
+    Distributed Random Forest (DRF).
+
+    ```python
+    from h2o.estimators.random_forest import H2ORandomForestEstimator
+    ```
+  </Card>
+  <Card title="H2ODeepLearningEstimator" icon="cpu">
+    Fully-connected deep neural network.
+
+    ```python
+    from h2o.estimators.deeplearning import H2ODeepLearningEstimator
+    ```
+  </Card>
+  <Card title="H2OGeneralizedLinearEstimator" icon="chart-line">
+    Generalized Linear Model (GLM). Supports Gaussian, binomial, Poisson, gamma, and Tweedie distributions.
+
+    ```python
+    from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+    ```
+  </Card>
+  <Card title="H2OGeneralizedAdditiveEstimator" icon="wave-square">
+    Generalized Additive Model (GAM).
+
+    ```python
+    from h2o.estimators.gam import H2OGeneralizedAdditiveEstimator
+    ```
+  </Card>
+  <Card title="H2OKMeansEstimator" icon="circle-dot">
+    K-Means clustering (unsupervised).
+
+    ```python
+    from h2o.estimators.kmeans import H2OKMeansEstimator
+    ```
+  </Card>
+  <Card title="H2OPrincipalComponentAnalysisEstimator" icon="arrows-maximize">
+    Principal Component Analysis (PCA).
+
+    ```python
+    from h2o.estimators.pca import H2OPrincipalComponentAnalysisEstimator
+    ```
+  </Card>
+  <Card title="H2OStackedEnsembleEstimator" icon="layer-group">
+    Stacked Ensemble. Combines multiple base models into a metalearner.
+
+    ```python
+    from h2o.estimators.stackedensemble import H2OStackedEnsembleEstimator
+    ```
+  </Card>
+  <Card title="H2ONaiveBayesEstimator" icon="calculator">
+    Naive Bayes classifier.
+
+    ```python
+    from h2o.estimators.naive_bayes import H2ONaiveBayesEstimator
+    ```
+  </Card>
+</Columns>
+
+---
+
+## Common methods
+
+All estimators inherit these methods from `H2OEstimator`.
+
+### train
+
+```python
+estimator.train(
+    x=None, y=None,
+    training_frame=None,
+    offset_column=None,
+    fold_column=None,
+    weights_column=None,
+    validation_frame=None,
+    max_runtime_secs=None,
+    ignored_columns=None,
+    model_id=None,
+    verbose=False
+)
+```
+
+Train the model on the provided dataset.
+
+<ParamField path="x" type="string[] | integer[]">
+  Column names or indices to use as predictors. When `None`, all columns except `y` are used.
+</ParamField>
+
+<ParamField path="y" type="string | integer" required>
+  Column name or index of the response variable.
+</ParamField>
+
+<ParamField path="training_frame" type="H2OFrame" required>
+  The frame containing training data.
+</ParamField>
+
+<ParamField path="offset_column" type="string">
+  Column to use as an offset (added to the linear predictor before applying the link function).
+</ParamField>
+
+<ParamField path="fold_column" type="string">
+  Column containing per-row cross-validation fold assignments.
+</ParamField>
+
+<ParamField path="weights_column" type="string">
+  Column containing per-row observation weights. Rows with weight `0` are excluded from training.
+</ParamField>
+
+<ParamField path="validation_frame" type="H2OFrame">
+  Optional frame to score against during training.
+</ParamField>
+
+<ParamField path="max_runtime_secs" type="float">
+  Maximum training time in seconds. `0` disables the limit.
+</ParamField>
+
+<ParamField path="ignored_columns" type="string[]">
+  Additional column names to exclude from training.
+</ParamField>
+
+<ParamField path="model_id" type="string">
+  Custom model ID. Auto-generated if not specified.
+</ParamField>
+
+<ParamField path="verbose" type="boolean" default="False">
+  Print scoring history to stdout during training.
+</ParamField>
+
+```python
+model.train(x=["age", "salary"], y="target", training_frame=train)
+```
+
+---
+
+### predict
+
+```python
+predictions = estimator.predict(test_data)
+```
+
+Generate predictions for a new dataset. Returns an `H2OFrame` with prediction columns.
+
+<ParamField path="test_data" type="H2OFrame" required>
+  The frame to score. Must contain the same predictor columns used during training.
+</ParamField>
+
+```python
+pred = model.predict(test)
+pred.head()
+```
+
+For classification models the returned frame includes a `predict` column (the predicted class) and probability columns for each class (`p0`, `p1`, etc.).
+
+---
+
+### model_performance
+
+```python
+perf = estimator.model_performance(test_data=None, train=False, valid=False, xval=False)
+```
+
+Return model metrics. When `test_data` is provided the metrics are computed on that set; otherwise metrics from training, validation, or cross-validation data are returned.
+
+<ParamField path="test_data" type="H2OFrame">
+  Dataset to evaluate. Takes precedence over `train`, `valid`, and `xval` flags.
+</ParamField>
+
+<ParamField path="train" type="boolean" default="False">
+  Return training metrics.
+</ParamField>
+
+<ParamField path="valid" type="boolean" default="False">
+  Return validation metrics.
+</ParamField>
+
+<ParamField path="xval" type="boolean" default="False">
+  Return cross-validation metrics.
+</ParamField>
+
+```python
+perf = model.model_performance(test_data=test)
+print(perf.auc())
+print(perf.mse())
+```
+
+---
+
+## GBM hyperparameters
+
+The following parameters are specific to `H2OGradientBoostingEstimator` and illustrate the depth of configuration available.
+
+<AccordionGroup>
+  <Accordion title="Tree structure">
+    <ParamField path="ntrees" type="integer" default="50">
+      Number of trees to build.
+    </ParamField>
+    <ParamField path="max_depth" type="integer" default="5">
+      Maximum depth of each tree. `0` for unlimited.
+    </ParamField>
+    <ParamField path="min_rows" type="float" default="10.0">
+      Minimum number of (weighted) observations in a leaf node.
+    </ParamField>
+    <ParamField path="nbins" type="integer" default="20">
+      Number of histogram bins for numeric columns.
+    </ParamField>
+    <ParamField path="nbins_cats" type="integer" default="1024">
+      Number of histogram bins for categorical columns.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Learning rate and regularization">
+    <ParamField path="learn_rate" type="float" default="0.1">
+      Shrinkage factor applied to each tree's contribution. Lower values require more trees.
+    </ParamField>
+    <ParamField path="learn_rate_annealing" type="float" default="1.0">
+      Reduce `learn_rate` by this factor after each tree. Values less than 1.0 slow the rate over time.
+    </ParamField>
+    <ParamField path="sample_rate" type="float" default="1.0">
+      Row sampling rate per tree (stochastic GBM). Values between `0.0` and `1.0`.
+    </ParamField>
+    <ParamField path="col_sample_rate" type="float" default="1.0">
+      Column sampling rate per split level.
+    </ParamField>
+    <ParamField path="col_sample_rate_per_tree" type="float" default="1.0">
+      Column sampling rate per tree.
+    </ParamField>
+    <ParamField path="min_split_improvement" type="float" default="0.00001">
+      Minimum relative improvement in squared error needed to split.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Early stopping">
+    <ParamField path="stopping_rounds" type="integer" default="0">
+      Number of scoring rounds with no improvement before stopping. `0` disables early stopping.
+    </ParamField>
+    <ParamField path="stopping_metric" type="string" default="auto">
+      Metric used for early stopping. One of: `"auto"`, `"deviance"`, `"logloss"`, `"mse"`, `"rmse"`, `"mae"`, `"auc"`, `"misclassification"`.
+    </ParamField>
+    <ParamField path="stopping_tolerance" type="float" default="0.001">
+      Relative improvement threshold required to avoid early stopping.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Cross-validation">
+    <ParamField path="nfolds" type="integer" default="0">
+      Number of folds for k-fold cross-validation. `0` disables CV; minimum useful value is `2`.
+    </ParamField>
+    <ParamField path="fold_assignment" type="string" default="auto">
+      Cross-validation fold assignment scheme. One of: `"auto"`, `"random"`, `"modulo"`, `"stratified"`.
+    </ParamField>
+    <ParamField path="keep_cross_validation_models" type="boolean" default="True">
+      Retain cross-validation sub-models after training.
+    </ParamField>
+    <ParamField path="keep_cross_validation_predictions" type="boolean" default="False">
+      Retain cross-validation holdout predictions.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Distribution and response">
+    <ParamField path="distribution" type="string" default="auto">
+      Distribution family. One of: `"auto"`, `"bernoulli"`, `"multinomial"`, `"gaussian"`, `"poisson"`, `"gamma"`, `"tweedie"`, `"laplace"`, `"quantile"`, `"huber"`.
+    </ParamField>
+    <ParamField path="balance_classes" type="boolean" default="False">
+      Balance class distribution by over/under-sampling for imbalanced classification problems.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Full example
+
+```python
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+h2o.init()
+
+# Load data
+titanic = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/titanic.csv")
+titanic["survived"] = titanic["survived"].asfactor()
+
+predictors = ["pclass", "sex", "age", "sibsp", "parch", "fare", "cabin"]
+response = "survived"
+
+train, test = titanic.split_frame(ratios=[0.8], seed=42)
+
+# Train
+model = H2OGradientBoostingEstimator(
+    ntrees=100,
+    max_depth=5,
+    learn_rate=0.05,
+    nfolds=5,
+    seed=42,
+)
+model.train(x=predictors, y=response, training_frame=train)
+
+# Evaluate
+perf = model.model_performance(test)
+print(perf.auc())
+
+# Predict
+pred = model.predict(test)
+pred.head()
+```

@@ -1,0 +1,191 @@
+---
+title: "Productionizing H2O Models"
+description: "Approaches, design patterns, and performance guidance for deploying H2O models to production scoring environments."
+keywords: ["productionizing", "scoring", "REST API", "MOJO", "POJO", "Jetty", "batch scoring", "real-time scoring"]
+---
+
+H2O models can be deployed to production in several ways. The right approach depends on your latency requirements, infrastructure, and how often you retrain.
+
+## Scoring approaches
+
+<AccordionGroup>
+  <Accordion title="MOJO / POJO (embedded scoring)">
+    Export the model as a MOJO or POJO and embed it directly inside your application JVM. The only runtime dependency is `h2o-genmodel.jar`. No H2O cluster is needed at scoring time.
+
+    - **Best for**: low-latency real-time scoring, environments where running a separate server is impractical.
+    - **Latency**: sub-millisecond per row for tree models.
+    - See [MOJO & POJO Export](/deployment/mojo-pojo) for download and compilation instructions.
+  </Accordion>
+
+  <Accordion title="H2O cluster REST endpoint">
+    Keep H2O running and call the `/3/Predictions` REST endpoint with new data rows. The cluster handles scoring in-process.
+
+    - **Best for**: interactive or exploratory scoring, batch jobs where data already lives in H2O frames.
+    - **Latency**: network round-trip + H2O overhead (~10–100 ms per request).
+  </Accordion>
+
+  <Accordion title="AWS scoring server">
+    Deploy H2O's inference server AMI from the AWS Marketplace. Copy your MOJO into `/tmp/pipeline.mojo` before launch, then query the REST endpoint:
+
+    ```bash
+    curl "http://<yourIP>:8080/model?type=1&row=2000,2000"
+    ```
+
+    Transfer the MOJO from S3 using instance userdata:
+
+    ```bash cloud-boothook userdata
+    #!/bin/bash
+    export mojofile="s3://yourbucket/yourmojo.zip"
+    aws s3 cp $mojofile /tmp/pipeline.mojo
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Real-time vs batch scoring
+
+| | Real-time | Batch |
+|---|---|---|
+| Scoring trigger | Single row / API request | Dataset / scheduled job |
+| Latency SLA | Milliseconds | Minutes to hours |
+| Recommended engine | MOJO embedded in servlet or Lambda | POJO or MOJO via Hive UDF, Spark map |
+| Infrastructure | Jetty servlet, Spring Boot, AWS Lambda | Hadoop MapReduce, Spark, Hive |
+
+---
+
+## Design patterns
+
+### Jetty servlet
+
+Embed a MOJO inside a Jetty web application to expose a REST scoring endpoint. Client-side Javascript sends user input; the servlet scores it with the MOJO and returns a prediction.
+
+**Example**: Consumer loan application — [github.com/h2oai/app-consumer-loan](https://github.com/h2oai/app-consumer-loan)
+
+| Characteristic | Value |
+|---|---|
+| Training language | R |
+| Scoring data source | User input from browser |
+| Scoring engine | H2O POJO |
+| Latency SLA | Real-time |
+
+### Sparkling Water streaming
+
+Use H2O inside Apache Spark (Sparkling Water) for streaming scoring scenarios. The H2O cluster provides model training while Spark handles data pipelines.
+
+**Example**: Craigslist application — [github.com/h2oai/app-ask-craig](https://github.com/h2oai/app-ask-craig)
+
+| Characteristic | Value |
+|---|---|
+| Training language | Scala |
+| Scoring engine | H2O cluster |
+| Latency SLA | Real-time |
+
+### AWS Lambda
+
+Package a POJO and `h2o-genmodel.jar` into an AWS Lambda function for serverless real-time scoring with automatic scaling.
+
+**Example**: Malicious domain detection — [github.com/h2oai/app-malicious-domains](https://github.com/h2oai/app-malicious-domains)
+
+### Hive UDF
+
+Embed a POJO or MOJO in a Hive User Defined Function. The UDF runs in parallel across MapReduce tasks, enabling batch scoring directly inside Hive SELECT queries.
+
+**Example**: [h2o-tutorials/hive_udf_template](https://github.com/h2oai/h2o-tutorials/tree/master/tutorials/hive_udf_template)
+
+### Apache Storm bolt
+
+Embed a POJO inside a Storm bolt for streaming event scoring. The POJO is invoked on each tuple as it passes through the topology.
+
+**Example**: [h2o-tutorials/streaming/storm](https://github.com/h2oai/h2o-tutorials/tree/master/tutorials/streaming/storm)
+
+### MOJO as a JAR resource
+
+Bundle the MOJO zip inside your application jar as a classpath resource. At runtime, load it with `MojoModel.load()` pointing to the resource path. This makes the model portable — it travels with the application artifact.
+
+**Example**: [h2o-tutorials/mojo-resource](https://github.com/h2oai/h2o-tutorials/tree/master/tutorials/mojo-resource)
+
+---
+
+## Downloading and scoring: end-to-end example
+
+<Steps>
+  <Step title="Train and export the model">
+    ```python
+    import h2o
+    from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+    h2o.init()
+    df = h2o.load_dataset("prostate.csv")
+    df["CAPSULE"] = df["CAPSULE"].asfactor()
+
+    model = H2OGradientBoostingEstimator(ntrees=100, max_depth=4, learn_rate=0.1)
+    model.train(y="CAPSULE", x=["AGE", "RACE", "PSA", "GLEASON"], training_frame=df)
+
+    # Download MOJO and the required genmodel jar
+    modelfile = model.download_mojo(path="~/scoring-app/", get_genmodel_jar=True)
+    print("MOJO saved to:", modelfile)
+    ```
+  </Step>
+
+  <Step title="Write the Java scoring class">
+    ```java ScoreRow.java
+    import hex.genmodel.easy.RowData;
+    import hex.genmodel.easy.EasyPredictModelWrapper;
+    import hex.genmodel.easy.prediction.BinomialModelPrediction;
+    import hex.genmodel.MojoModel;
+
+    public class ScoreRow {
+      public static void main(String[] args) throws Exception {
+        EasyPredictModelWrapper model = new EasyPredictModelWrapper(
+            MojoModel.load(args[0])  // path to .zip passed as argument
+        );
+
+        RowData row = new RowData();
+        row.put("AGE", "68");
+        row.put("RACE", "2");
+        row.put("PSA", "14.0");
+        row.put("GLEASON", "7");
+
+        BinomialModelPrediction p = model.predictBinomial(row);
+        System.out.printf("Prediction: %s%n", p.label);
+        System.out.printf("P(0)=%.4f  P(1)=%.4f%n",
+            p.classProbabilities[0],
+            p.classProbabilities[1]);
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Compile and run">
+    ```bash
+    # Compile
+    javac -cp h2o-genmodel.jar ScoreRow.java
+
+    # Run (Linux / macOS)
+    java -cp .:h2o-genmodel.jar ScoreRow GBM_model.zip
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Performance considerations
+
+<Note>
+These guidelines apply to MOJO/POJO scoring. For H2O cluster REST scoring, latency is dominated by network overhead and frame parsing.
+</Note>
+
+- **Use MOJOs over POJOs** for large models. At 5000 trees / depth 25, MOJOs are 20–25× smaller on disk and 2–3× faster during hot scoring.
+- **Reuse `EasyPredictModelWrapper`** — loading a model from disk is expensive. Create one instance per model and share it across threads (both MOJOs and POJOs are thread safe).
+- **Pre-allocate `RowData`** objects and reuse them when possible to reduce GC pressure in high-throughput paths.
+- **Disable optional features** (leaf node assignments, Shapley contributions) unless you need them — each adds per-prediction computation.
+- **JVM warm-up**: cold scoring (first predictions after JVM start) is significantly slower than hot scoring. For latency-sensitive services, pre-warm the JVM by scoring a few dummy rows at startup.
+
+---
+
+## Additional resources
+
+- [POJO and MOJO Model Javadoc](http://docs.h2o.ai/h2o/latest-stable/h2o-genmodel/javadoc/index.html)
+- [MOJO & POJO Export](/deployment/mojo-pojo)
+- [H2O Open Tour 2016: Ways to Productionize H2O](https://github.com/h2oai/h2o-meetups/tree/master/2016_07_19_H2O_Open_Tour_NYC_Prod/)

@@ -1,0 +1,543 @@
+---
+title: "R Estimator Functions"
+description: "Reference for all H2O-3 model training functions available in the R package, including key parameters and usage examples."
+keywords: ["h2o.gbm", "h2o.randomForest", "h2o.deeplearning", "h2o.glm", "h2o.automl", "h2o estimators R"]
+---
+
+H2O-3 estimator functions follow a consistent interface. All supervised algorithms accept `x` (predictor column names or indices), `y` (response column), and `training_frame`. Unsupervised algorithms omit `y`.
+
+<Note>
+  All estimator functions return an H2O model object. Pass it to `h2o.predict()` for inference or `h2o.performance()` for evaluation metrics.
+</Note>
+
+---
+
+## h2o.gbm()
+
+Gradient Boosting Machine — builds an ensemble of shallow decision trees where each tree corrects the residuals of the previous.
+
+```r
+model <- h2o.gbm(
+  x                = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y                = "CAPSULE",
+  training_frame   = train,
+  validation_frame = valid,
+  ntrees           = 100,
+  max_depth        = 5,
+  learn_rate       = 0.05,
+  sample_rate      = 0.8,
+  col_sample_rate  = 0.8,
+  nfolds           = 5,
+  seed             = 42
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="x" type="character[]">
+      Predictor column names or indices. If omitted, all columns except `y` are used.
+    </ParamField>
+    <ParamField path="y" type="string" required>
+      Response column name or index. Numeric response trains regression; factor response trains classification.
+    </ParamField>
+    <ParamField path="training_frame" type="H2OFrame" required>
+      Training dataset.
+    </ParamField>
+    <ParamField path="ntrees" type="number" default="50">
+      Number of trees to build.
+    </ParamField>
+    <ParamField path="max_depth" type="number" default="5">
+      Maximum tree depth. Use 0 for unlimited.
+    </ParamField>
+    <ParamField path="learn_rate" type="number" default="0.1">
+      Learning rate (shrinkage). Range: 0.0 to 1.0. Lower values require more trees but often generalize better.
+    </ParamField>
+    <ParamField path="sample_rate" type="number" default="1.0">
+      Row sample rate per tree. Range: 0.0 to 1.0.
+    </ParamField>
+    <ParamField path="col_sample_rate" type="number" default="1.0">
+      Column sample rate per split. Range: 0.0 to 1.0.
+    </ParamField>
+    <ParamField path="nfolds" type="number" default="0">
+      Number of cross-validation folds. 0 disables cross-validation.
+    </ParamField>
+    <ParamField path="distribution" type="string" default="AUTO">
+      Loss distribution. Options: `AUTO`, `bernoulli`, `multinomial`, `gaussian`, `poisson`, `gamma`, `tweedie`, `laplace`, `quantile`, `huber`.
+    </ParamField>
+    <ParamField path="stopping_rounds" type="number" default="0">
+      Early stopping: stop if the metric does not improve for this many scoring rounds.
+    </ParamField>
+    <ParamField path="min_rows" type="number" default="10">
+      Minimum number of observations in a leaf node.
+    </ParamField>
+    <ParamField path="seed" type="number" default="-1">
+      Random seed for reproducibility. `-1` uses a time-based seed.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.xgboost()
+
+XGBoost — uses the native XGBoost backend for gradient boosted trees. Generally faster than `h2o.gbm()` for single-node workloads.
+
+```r
+model <- h2o.xgboost(
+  x              = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y              = "CAPSULE",
+  training_frame = train,
+  ntrees         = 100,
+  max_depth      = 6,
+  learn_rate     = 0.1,
+  sample_rate    = 0.8,
+  seed           = 42
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="ntrees" type="number" default="50">
+      Number of trees (also referred to as `n_estimators`).
+    </ParamField>
+    <ParamField path="max_depth" type="number" default="6">
+      Maximum tree depth.
+    </ParamField>
+    <ParamField path="learn_rate" type="number" default="0.1">
+      Step size shrinkage applied after each boosting step.
+    </ParamField>
+    <ParamField path="sample_rate" type="number" default="1.0">
+      Subsample ratio of the training data for each tree.
+    </ParamField>
+    <ParamField path="col_sample_rate" type="number" default="1.0">
+      Subsample ratio of columns for each tree.
+    </ParamField>
+    <ParamField path="min_rows" type="number" default="1">
+      Minimum number of observations in a leaf (also referred to as `min_child_weight`).
+    </ParamField>
+    <ParamField path="distribution" type="string" default="AUTO">
+      Loss distribution. Options: `AUTO`, `bernoulli`, `multinomial`, `gaussian`, `poisson`, `gamma`, `tweedie`, `laplace`, `quantile`, `huber`.
+    </ParamField>
+    <ParamField path="reg_lambda" type="number" default="1">
+      L2 regularization term on leaf weights.
+    </ParamField>
+    <ParamField path="reg_alpha" type="number" default="0">
+      L1 regularization term on leaf weights.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.randomForest()
+
+Distributed Random Forest (DRF) — builds an ensemble of deep, independently-trained decision trees with bootstrap sampling.
+
+```r
+model <- h2o.randomForest(
+  x              = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y              = "CAPSULE",
+  training_frame = train,
+  ntrees         = 100,
+  max_depth      = 20,
+  mtries         = -1,
+  sample_rate    = 0.632,
+  nfolds         = 5,
+  seed           = 42
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="ntrees" type="number" default="50">
+      Number of trees.
+    </ParamField>
+    <ParamField path="max_depth" type="number" default="20">
+      Maximum tree depth. Use 0 for unlimited.
+    </ParamField>
+    <ParamField path="mtries" type="number" default="-1">
+      Number of columns randomly sampled at each split. `-1` defaults to `sqrt(p)` for classification and `p/3` for regression, where `p` is the number of predictors.
+    </ParamField>
+    <ParamField path="sample_rate" type="number" default="0.632">
+      Row sample rate per tree. The default 0.632 matches the classic bootstrap fraction.
+    </ParamField>
+    <ParamField path="binomial_double_trees" type="boolean" default="FALSE">
+      Build twice as many trees for binary classification (one per class). Can improve accuracy at the cost of training time.
+    </ParamField>
+    <ParamField path="min_rows" type="number" default="1">
+      Minimum observations in a leaf node.
+    </ParamField>
+    <ParamField path="nfolds" type="number" default="0">
+      Number of cross-validation folds.
+    </ParamField>
+    <ParamField path="seed" type="number" default="-1">
+      Random seed.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.deeplearning()
+
+Deep Learning (Neural Network) — feed-forward multilayer neural network with adaptive learning rate (ADADELTA by default).
+
+```r
+model <- h2o.deeplearning(
+  x              = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y              = "CAPSULE",
+  training_frame = train,
+  hidden         = c(200, 200),
+  epochs         = 50,
+  activation     = "RectifierWithDropout",
+  hidden_dropout_ratios = c(0.2, 0.2),
+  l2             = 1e-5,
+  seed           = 42
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="hidden" type="number[]" default="c(200, 200)">
+      Hidden layer sizes. Each element specifies the number of neurons in that layer. Example: `c(128, 64, 32)` builds a 3-hidden-layer network.
+    </ParamField>
+    <ParamField path="epochs" type="number" default="10">
+      Number of passes over the training data. Can be fractional.
+    </ParamField>
+    <ParamField path="activation" type="string" default="Rectifier">
+      Activation function. Options: `Tanh`, `TanhWithDropout`, `Rectifier`, `RectifierWithDropout`, `Maxout`, `MaxoutWithDropout`.
+    </ParamField>
+    <ParamField path="hidden_dropout_ratios" type="number[]">
+      Dropout rates per hidden layer. Must have the same length as `hidden`. Example: `c(0.2, 0.2)`.
+    </ParamField>
+    <ParamField path="input_dropout_ratio" type="number" default="0">
+      Dropout ratio for the input layer.
+    </ParamField>
+    <ParamField path="l1" type="number" default="0">
+      L1 regularization. Induces sparsity.
+    </ParamField>
+    <ParamField path="l2" type="number" default="0">
+      L2 regularization. Reduces weight magnitude.
+    </ParamField>
+    <ParamField path="adaptive_rate" type="boolean" default="TRUE">
+      Use ADADELTA adaptive learning rate. Set to `FALSE` to use a fixed learning rate.
+    </ParamField>
+    <ParamField path="rate" type="number" default="0.005">
+      Learning rate when `adaptive_rate = FALSE`.
+    </ParamField>
+    <ParamField path="standardize" type="boolean" default="TRUE">
+      Standardize numeric inputs to zero mean and unit variance.
+    </ParamField>
+    <ParamField path="overwrite_with_best_model" type="boolean" default="TRUE">
+      Replace the final model with the best-scoring checkpoint found during training.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.glm()
+
+Generalized Linear Model — fits regularized linear models (Lasso, Ridge, Elastic Net) for regression and classification.
+
+```r
+model <- h2o.glm(
+  x              = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y              = "CAPSULE",
+  training_frame = train,
+  family         = "binomial",
+  alpha          = 0.5,
+  lambda_search  = TRUE,
+  nfolds         = 5,
+  seed           = 42
+)
+
+# View model coefficients
+h2o.coef(model)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="family" type="string" default="AUTO">
+      Response distribution family. Options: `AUTO`, `gaussian`, `binomial`, `multinomial`, `poisson`, `gamma`, `tweedie`, `negativebinomial`, `ordinal`, `quasibinomial`, `fractionalbinomial`.
+    </ParamField>
+    <ParamField path="alpha" type="number">
+      Elastic net mixing: `0` = Ridge (L2 only), `1` = Lasso (L1 only). Default is `0` for L-BFGS solver, `0.5` otherwise.
+    </ParamField>
+    <ParamField path="lambda" type="number">
+      Regularization strength. Larger values produce more regularization.
+    </ParamField>
+    <ParamField path="lambda_search" type="boolean" default="FALSE">
+      Search for optimal lambda from `lambda_max` down to `lambda`. Recommended for finding good regularization.
+    </ParamField>
+    <ParamField path="standardize" type="boolean" default="TRUE">
+      Standardize numeric predictors to zero mean and unit variance before fitting.
+    </ParamField>
+    <ParamField path="solver" type="string" default="AUTO">
+      Optimization algorithm. Options: `AUTO`, `IRLSM`, `L_BFGS`, `COORDINATE_DESCENT`, `COORDINATE_DESCENT_NAIVE`.
+    </ParamField>
+    <ParamField path="compute_p_values" type="boolean" default="FALSE">
+      Compute p-values for coefficients. Only works with the IRLSM solver.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.gam()
+
+Generalized Additive Model — extends GLM with smooth spline terms for non-linear effects.
+
+```r
+model <- h2o.gam(
+  x            = c("AGE", "RACE"),
+  y            = "CAPSULE",
+  training_frame = train,
+  gam_columns  = list(c("PSA"), c("VOL"), c("GLEASON")),
+  family       = "binomial",
+  seed         = 42
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="gam_columns" type="list" required>
+      A list of column name vectors specifying which columns to apply GAM smoothers to. Each element can be a single column `c("col1")` or multiple columns for interaction splines `c("col1", "col2")`.
+    </ParamField>
+    <ParamField path="family" type="string" default="AUTO">
+      Response distribution family. Same options as `h2o.glm()`.
+    </ParamField>
+    <ParamField path="bs" type="number[]">
+      Spline basis type for each GAM column. `0` = cubic regression spline, `1` = cyclic cubic regression spline.
+    </ParamField>
+    <ParamField path="num_knots" type="number[]">
+      Number of knots for each GAM column smoother.
+    </ParamField>
+    <ParamField path="alpha" type="number">
+      Elastic net mixing parameter (same as GLM).
+    </ParamField>
+    <ParamField path="lambda_search" type="boolean" default="FALSE">
+      Perform a lambda search (same as GLM).
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.automl()
+
+AutoML — automatically trains and tunes multiple models, then ranks them on a leaderboard.
+
+```r
+aml <- h2o.automl(
+  x                  = c("AGE", "RACE", "PSA", "VOL", "GLEASON"),
+  y                  = "CAPSULE",
+  training_frame     = train,
+  leaderboard_frame  = test,
+  max_models         = 20,
+  max_runtime_secs   = 3600,
+  seed               = 42
+)
+
+# Leaderboard
+lb <- h2o.get_leaderboard(aml, extra_columns = "ALL")
+print(lb, n = 20)
+
+# Best model
+best_model <- aml@leader
+preds <- h2o.predict(best_model, newdata = test)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="max_models" type="number">
+      Maximum number of individual models to train (excluding Stacked Ensembles). Setting this guarantees reproducibility.
+    </ParamField>
+    <ParamField path="max_runtime_secs" type="number" default="3600">
+      Maximum wall-clock time for the entire AutoML run in seconds.
+    </ParamField>
+    <ParamField path="max_runtime_secs_per_model" type="number" default="0">
+      Maximum time per individual model. `0` disables the per-model limit.
+    </ParamField>
+    <ParamField path="leaderboard_frame" type="H2OFrame">
+      Separate holdout frame for leaderboard scoring. If not provided, cross-validation metrics are used.
+    </ParamField>
+    <ParamField path="nfolds" type="number" default="5">
+      Cross-validation folds for individual models. Set to `0` to disable (and use `validation_frame` instead).
+    </ParamField>
+    <ParamField path="exclude_algos" type="character[]">
+      Algorithms to skip. Options: `"DRF"`, `"GLM"`, `"XGBoost"`, `"GBM"`, `"DeepLearning"`, `"StackedEnsemble"`.
+    </ParamField>
+    <ParamField path="include_algos" type="character[]">
+      Restrict to only these algorithms. Cannot be used with `exclude_algos`.
+    </ParamField>
+    <ParamField path="sort_metric" type="string" default="AUTO">
+      Metric used to rank the leaderboard. Defaults to `AUC` for binary classification, `mean_per_class_error` for multinomial, and `mean_residual_deviance` for regression.
+    </ParamField>
+    <ParamField path="project_name" type="string">
+      Name for this AutoML run. Models from multiple runs with the same project name are combined into one leaderboard.
+    </ParamField>
+    <ParamField path="seed" type="number" default="-1">
+      Random seed. Set `max_models` (not `max_runtime_secs`) for fully reproducible runs.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.kmeans()
+
+K-Means clustering — partitions data into `k` clusters by minimizing within-cluster sum of squares.
+
+```r
+model <- h2o.kmeans(
+  training_frame = prostate,
+  x              = c("AGE", "RACE", "VOL", "GLEASON"),
+  k              = 5,
+  max_iterations = 100,
+  standardize    = TRUE,
+  seed           = 42
+)
+
+# Cluster assignments
+assignments <- h2o.predict(model, newdata = prostate)
+
+# Cluster centers
+h2o.centers(model)
+h2o.withinss(model)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="k" type="number" default="1">
+      Number of clusters. When `estimate_k = TRUE`, this is treated as the maximum.
+    </ParamField>
+    <ParamField path="max_iterations" type="number" default="10">
+      Maximum number of Lloyd's iterations.
+    </ParamField>
+    <ParamField path="standardize" type="boolean" default="TRUE">
+      Standardize columns before computing distances.
+    </ParamField>
+    <ParamField path="init" type="string" default="Furthest">
+      Initialization strategy. Options: `Random`, `PlusPlus`, `Furthest`, `User`.
+    </ParamField>
+    <ParamField path="estimate_k" type="boolean" default="FALSE">
+      Automatically estimate the number of clusters up to `k`.
+    </ParamField>
+    <ParamField path="user_points" type="H2OFrame">
+      A frame with one row per cluster specifying initial centroid positions. Requires `init = "User"`.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.prcomp()
+
+Principal Component Analysis — reduces dimensionality by projecting data onto principal components.
+
+```r
+model <- h2o.prcomp(
+  training_frame = australia,
+  k              = 4,
+  transform      = "STANDARDIZE",
+  pca_method     = "GramSVD"
+)
+
+# Explained variance
+summary(model)
+
+# Project data onto components
+projected <- h2o.predict(model, newdata = australia)
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="k" type="number" default="1">
+      Number of principal components to compute.
+    </ParamField>
+    <ParamField path="transform" type="string" default="NONE">
+      Pre-processing transformation. Options: `NONE`, `STANDARDIZE`, `NORMALIZE`, `DEMEAN`, `DESCALE`.
+    </ParamField>
+    <ParamField path="pca_method" type="string" default="GramSVD">
+      Algorithm for PCA computation. Options: `GramSVD`, `Power`, `Randomized`, `GLRM`.
+    </ParamField>
+    <ParamField path="use_all_factor_levels" type="boolean" default="FALSE">
+      Include all levels of categorical columns (no reference level dropped).
+    </ParamField>
+    <ParamField path="impute_missing" type="boolean" default="FALSE">
+      Impute missing values with column mean before PCA.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## h2o.stackedEnsemble()
+
+Stacked Ensemble (Super Learner) — combines predictions from multiple base models using a metalearner.
+
+```r
+# Train base models with cross-validation
+gbm_base <- h2o.gbm(
+  x = predictors, y = response, training_frame = train,
+  nfolds = 5, keep_cross_validation_predictions = TRUE, seed = 1
+)
+rf_base <- h2o.randomForest(
+  x = predictors, y = response, training_frame = train,
+  nfolds = 5, keep_cross_validation_predictions = TRUE, seed = 1
+)
+
+# Build stacked ensemble
+ensemble <- h2o.stackedEnsemble(
+  x              = predictors,
+  y              = response,
+  training_frame = train,
+  base_models    = list(gbm_base, rf_base),
+  metalearner_algorithm = "glm"
+)
+
+h2o.auc(h2o.performance(ensemble, newdata = test))
+```
+
+<AccordionGroup>
+  <Accordion title="Key parameters">
+    <ParamField path="base_models" type="list" required>
+      List of trained H2O model objects or model IDs. Each base model must have been trained with `nfolds >= 2` and `keep_cross_validation_predictions = TRUE`.
+    </ParamField>
+    <ParamField path="metalearner_algorithm" type="string" default="AUTO">
+      Algorithm for the metalearner. Options: `AUTO`, `glm`, `gbm`, `drf`, `deeplearning`, `naivebayes`, `xgboost`.
+    </ParamField>
+    <ParamField path="metalearner_nfolds" type="number" default="0">
+      Cross-validation folds for the metalearner.
+    </ParamField>
+    <ParamField path="blending_frame" type="H2OFrame">
+      Optional holdout frame used to train the metalearner instead of cross-validated predictions.
+    </ParamField>
+    <ParamField path="keep_levelone_frame" type="boolean" default="FALSE">
+      Retain the level-one frame (metalearner training data) in the cluster.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Common parameters across estimators
+
+These parameters are available on most supervised estimators.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `validation_frame` | H2OFrame | — | Frame for computing validation metrics during training |
+| `nfolds` | integer | `0` | K-fold cross-validation folds (`0` disables) |
+| `fold_assignment` | string | `AUTO` | Fold assignment: `AUTO`, `Random`, `Modulo`, `Stratified` |
+| `weights_column` | string | — | Per-row observation weights |
+| `offset_column` | string | — | Offset added to predictions before the link function |
+| `balance_classes` | logical | `FALSE` | Over/under-sample to balance class distribution |
+| `stopping_rounds` | integer | `0` | Early stopping patience; `0` disables |
+| `stopping_metric` | string | `AUTO` | Metric for early stopping: `AUC`, `logloss`, `RMSE`, `MSE`, etc. |
+| `stopping_tolerance` | number | `0.001` | Minimum relative improvement to continue training |
+| `max_runtime_secs` | number | `0` | Hard time limit for training; `0` disables |
+| `seed` | integer | `-1` | Random seed; `-1` uses time-based seed |
+| `model_id` | string | — | Custom key to assign this model in the DKV |
+| `export_checkpoints_dir` | string | — | Directory to save model checkpoints during training |

@@ -1,0 +1,540 @@
+---
+title: "Data munging"
+description: "Import, slice, filter, join, aggregate, and transform data in H2O-3."
+keywords: ["data munging", "import", "filter", "merge", "group by", "fillna", "impute", "type conversion"]
+---
+
+H2O-3 provides a rich set of data manipulation operations that run distributed across the cluster. Most operations are lazy — they build an expression tree that is evaluated only when a result is needed.
+
+## Importing data
+
+### import_file vs. upload_file
+
+<CardGroup cols={2}>
+  <Card title="import_file" icon="download">
+    A parallelized server-side read. The path is resolved by the H2O cluster, not the client. Use this for production workloads — it is fast, scalable, and does not route data through the client.
+  </Card>
+  <Card title="upload_file" icon="upload">
+    A client-to-server push. The path is resolved on the machine running Python or R. Use this only for small local files during development.
+  </Card>
+</CardGroup>
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    h2o.init()
+
+    # Import from S3 (server-side read)
+    airlines = h2o.import_file(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k_headers.zip"
+    )
+
+    # Import from HDFS (include the node name)
+    df = h2o.import_file("hdfs://node-1:/user/smalldata/airlines/allyears2k_headers.zip")
+
+    # Upload a local file (client-side push — small files only)
+    iris = h2o.upload_file("../smalldata/iris/iris_wheader.csv")
+    ```
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    # Import from a local path bundled with the H2O package
+    iris_path <- system.file("extdata", "iris.csv", package = "h2o")
+    iris <- h2o.importFile(path = iris_path)
+
+    # Import from S3
+    airlines <- h2o.importFile(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k.zip"
+    )
+
+    # Import from HDFS
+    df <- h2o.importFile("hdfs://node-1:/user/smalldata/airlines/allyears2k_headers.zip")
+
+    # Upload a local file
+    iris <- h2o.uploadFile(path = "../smalldata/iris/iris_wheader.csv")
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+When parsing files that contain timestamps without a timezone, H2O-3 interprets them as UTC. To override: **Python** — `h2o.cluster().timezone = "America/Los_Angeles"` / **R** — `h2o.setTimezone("America/Los_Angeles")`.
+</Note>
+
+### Supported file formats
+
+H2O-3 can parse all of the following formats:
+
+| Format | Notes |
+|---|---|
+| CSV / TSV | Auto-detects delimiter, quoting, and header |
+| Parquet | Columnar; preferred for large datasets |
+| ORC | Columnar; common in Hadoop ecosystems |
+| Avro | Schema-embedded binary format |
+| ARFF | Weka attribute-relation format |
+| XLS / XLSX | Excel spreadsheets |
+| JSON | Newline-delimited JSON records |
+| SVMLight | Sparse feature format |
+
+### Importing from a SQL table
+
+```python
+# Python — import from a relational database
+connection_url = "jdbc:mysql://localhost:3306/mydb?&useSSL=false"
+username = "user"
+password = "pass"
+
+df = h2o.import_sql_table(
+    connection_url=connection_url,
+    table="customers",
+    username=username,
+    password=password
+)
+```
+
+```r
+# R — import from a relational database
+df <- h2o.import_sql_table(
+  connection_url = "jdbc:mysql://localhost:3306/mydb?&useSSL=false",
+  table = "customers",
+  username = "user",
+  password = "pass"
+)
+```
+
+---
+
+## Slicing rows and columns
+
+H2O-3 uses lazy slicing — the slice is only materialized when results are needed.
+
+### Slicing rows
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init()
+
+path = "http://h2o-public-test-data.s3.amazonaws.com/smalldata/iris/iris_wheader.csv"
+df = h2o.import_file(path=path)
+
+# Single row by index
+row = df[15, :]
+
+# Range of rows
+rows = df[range(25, 50, 1), :]
+
+# Boolean mask — rows where sepal_len < 4.6
+mask = df["sepal_len"] < 4.6
+filtered = df[mask, :]
+
+# Filter out rows with missing values
+mask = df["sepal_len"].isna()
+no_missing = df[~mask, :]
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+path <- "http://h2o-public-test-data.s3.amazonaws.com/smalldata/iris/iris_wheader.csv"
+df <- h2o.importFile(path)
+
+# Single row by index
+row <- df[15, ]
+
+# Range of rows
+rows <- df[25:49, ]
+
+# Boolean mask — rows where sepal_len < 4.6
+mask <- df[, "sepal_len"] < 4.6
+filtered <- df[mask, ]
+
+# Filter out rows with missing values
+mask <- is.na(df[, "sepal_len"])
+no_missing <- df[!mask, ]
+```
+
+</CodeGroup>
+
+### Slicing columns
+
+<CodeGroup>
+
+```python Python
+# By index
+c1 = df[:, 0]
+
+# By name
+c1 = df[:, "sepal_len"]
+
+# By range of indexes
+cols = df[:, range(3)]
+
+# By list of names
+cols = df[:, ["sepal_wid", "petal_len", "petal_wid"]]
+```
+
+```r R
+# By index
+c1 <- df[, 1]
+
+# By name
+c1 <- df[, "sepal_len"]
+
+# By vector of indexes
+cols <- df[, 1:4]
+
+# By vector of names
+cols <- df[, c("sepal_len", "sepal_wid", "petal_len", "petal_wid")]
+```
+
+</CodeGroup>
+
+---
+
+## Merging and joining frames
+
+Use `merge` to join two frames on a common column. By default all shared column names are used as the merge key. In a multi-node cluster, one of the frames must be small enough to fit in memory on every node.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    import numpy as np
+    h2o.init()
+
+    df1 = h2o.H2OFrame.from_python({
+        "A": ["Hello", "World", "Welcome", "To", "H2O", "World"],
+        "n": [0, 1, 2, 3, 4, 5]
+    })
+
+    df2 = h2o.H2OFrame.from_python(
+        [[x] for x in np.random.randint(0, 10, size=20).tolist()],
+        column_names=["n"]
+    )
+
+    # Inner join (default) — only rows with matching keys in both frames
+    df3 = df2.merge(df1)
+
+    # Left join — all rows from df2, NaN for non-matching keys
+    df4 = df2.merge(df1, all_x=True)
+    ```
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    left <- data.frame(
+        fruit  = c("apple", "orange", "banana", "lemon", "strawberry", "blueberry"),
+        color  = c("red", "orange", "yellow", "yellow", "red", "blue")
+    )
+    right <- data.frame(
+        fruit  = c("apple", "orange", "banana", "lemon", "strawberry", "watermelon"),
+        citrus = c(FALSE, TRUE, FALSE, TRUE, FALSE, FALSE)
+    )
+
+    left_frame  <- as.h2o(left)
+    right_frame <- as.h2o(right)
+
+    # Left join — all rows from left_frame, NA for non-matching keys in right_frame
+    merged <- h2o.merge(left_frame, right_frame, all.x = TRUE)
+    print(merged)
+    #        fruit  color citrus
+    # 1  blueberry   blue   <NA>
+    # 2      apple    red  FALSE
+    # ...
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+In multi-node clusters, one frame must fit in memory on every node for the merge to work correctly.
+</Note>
+
+---
+
+## Group-by operations
+
+`group_by` splits a frame into groups by one or more columns, applies an aggregation function, and returns a new frame. Results are sorted by the natural group-by column sort.
+
+Available aggregations: `count`, `sum`, `mean`, `min`, `max`, `sd`, `var`, `ss`, `mode`.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    h2o.init()
+
+    air = h2o.import_file(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k.zip"
+    )
+
+    # Count flights by origin airport
+    origin_flights = air.group_by("Origin").count().get_frame()
+
+    # Count flights per origin and month
+    flights_by_origin_month = (
+        air.group_by(by=["Origin", "Month"])
+           .count(na="all")
+           .get_frame()
+    )
+
+    # Sum cancellations per month
+    cancellations = (
+        air.group_by(by="Month")
+           .sum("Cancelled", na="all")
+           .get_frame()
+    )
+
+    # Multiple aggregations in one call
+    summary = (
+        air[["Origin", "Dest", "IsArrDelayed", "IsDepDelayed"]]
+           .group_by(by="Origin")
+           .sum(["Dest", "IsArrDelayed", "IsDepDelayed"], na="ignore")
+           .get_frame()
+    )
+    ```
+
+    **NA handling** (`na` parameter):
+    - `"all"` (default) — NA values propagate to the result.
+    - `"ignore"` — NAs excluded from calculation; denominator is the full row count.
+    - `"rm"` — NAs skipped; denominator is the non-NA row count.
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    airlines <- h2o.importFile(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k.zip"
+    )
+
+    # Count flights by origin airport
+    origin_flights <- h2o.group_by(
+        data       = airlines,
+        by         = "Origin",
+        nrow("Origin"),
+        gb.control = list(na.methods = "rm")
+    )
+
+    # Count flights per month
+    flights_by_month <- h2o.group_by(
+        data       = airlines,
+        by         = "Month",
+        nrow("Month"),
+        gb.control = list(na.methods = "rm")
+    )
+
+    # Sum cancellations per month
+    cancellations_by_month <- h2o.group_by(
+        data       = airlines,
+        by         = "Month",
+        sum("Cancelled"),
+        gb.control = list(na.methods = "rm")
+    )
+
+    # Cancellation rate per month
+    rate <- cancellations_by_month$sum_Cancelled / flights_by_month$nrow
+    rates_table <- h2o.cbind(flights_by_month$Month, rate)
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+A `GroupBy` object can only be used once. To apply different aggregations, create a new `group_by` call.
+</Tip>
+
+---
+
+## Handling missing values
+
+### fillna — sequential fill
+
+Fill NA values forward or backward along rows or columns, up to a maximum run length.
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init()
+
+df = h2o.create_frame(rows=10, cols=3,
+                      real_fraction=1.0, real_range=100,
+                      missing_fraction=0.2, seed=123)
+
+# Forward-fill row-wise (axis=0), one consecutive NA at a time
+filled = df.fillna(method="forward", axis=0, maxlen=1)
+
+# Backward-fill column-wise (axis=1), up to 3 consecutive NAs
+filled = df.fillna(method="backward", axis=1, maxlen=3)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+fr <- h2o.createFrame(categorical_fraction = 0.0,
+                      missing_fraction = 0.7,
+                      rows = 6, cols = 2, seed = 123)
+
+# Forward-fill row-wise (axis=1 in R), one consecutive NA at a time
+filled <- h2o.fillna(fr, "forward", axis = 1, maxlen = 1L)
+```
+
+</CodeGroup>
+
+### impute — aggregate-based imputation
+
+Replace NAs with the column mean, median, or mode — optionally computed within groups.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    h2o.init()
+
+    air = h2o.import_file(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k.zip"
+    )
+
+    # Mean-impute DepTime using Origin and Distance as grouping columns
+    air.impute("DepTime", method="mean", by=["Origin", "Distance"])
+
+    # Mode-impute a categorical column
+    air.impute("TailNum", method="mode")
+
+    # Mode-impute grouped by Month and Year
+    air.impute("TailNum", method="mode", by=["Month", "Year"])
+    ```
+
+    <Note>
+    `impute()` modifies the frame in place. Re-import the data to revert.
+    </Note>
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    air <- h2o.importFile(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/airlines/allyears2k.zip"
+    )
+
+    # Mean-impute DepTime
+    h2o.impute(air, "DepTime", method = "mean")
+
+    # Mean-impute DepTime grouped by Dest
+    h2o.impute(air, "DepTime", method = "mean", by = c("Dest"))
+
+    # Mode-impute a factor column
+    h2o.impute(air, "TailNum", method = "mode")
+
+    # Mode-impute grouped by Month
+    h2o.impute(air, "TailNum", method = "mode", by = c("Month"))
+    ```
+  </Tab>
+</Tabs>
+
+Available imputation methods:
+
+| Method | Applies to | Description |
+|---|---|---|
+| `mean` | numeric | Replace NAs with the column mean |
+| `median` | numeric | Replace NAs with the column median |
+| `mode` | categorical (enum/factor) | Replace NAs with the most frequent value |
+
+---
+
+## Type conversion
+
+H2O-3 algorithms treat `enum`/`factor` columns as categorical (classification) and `numeric` columns as continuous (regression). Converting types is a common preprocessing step.
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    h2o.init()
+
+    cars = h2o.import_file(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/junit/cars_20mpg.csv"
+    )
+
+    # Numeric → factor (categorical)
+    cars["cylinders"] = cars["cylinders"].asfactor()
+    print(cars["cylinders"].isfactor())  # [True]
+
+    # Factor → numeric
+    cars["cylinders"] = cars["cylinders"].asnumeric()
+    print(cars["cylinders"].isnumeric())  # [True]
+
+    # Convert multiple columns at once
+    cars[["cylinders", "economy_20mpg"]] = (
+        cars[["cylinders", "economy_20mpg"]].asfactor()
+    )
+
+    # enum → numeric: go via character to preserve mapped values
+    cars["name"] = cars["name"].ascharacter().asnumeric()
+
+    # Parse date strings
+    hdf = h2o.import_file(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/jira/v-11-eurodate.csv"
+    )
+    hdf["ds5"].as_date("%d.%m.%y %H:%M")
+
+    # Extract date parts
+    hdf["ds3"].year()
+    hdf["ds3"].month()
+    hdf["ds3"].dayOfWeek()
+    hdf["ds3"].hour()
+    ```
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    cars <- h2o.importFile(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/junit/cars_20mpg.csv"
+    )
+
+    # Numeric → factor (categorical)
+    cars["cylinders"] <- as.factor(cars["cylinders"])
+    print(h2o.isfactor(cars["cylinders"]))  # TRUE
+
+    # Factor → numeric
+    cars["cylinders"] <- as.numeric(cars["cylinders"])
+    print(h2o.isnumeric(cars["cylinders"]))  # TRUE
+
+    # Convert multiple columns
+    cars[c("cylinders", "economy_20mpg")] <- as.factor(
+        cars[c("cylinders", "economy_20mpg")]
+    )
+
+    # enum → numeric: go via character to preserve values
+    cars["name"] <- as.character(cars["name"])
+    cars["name"] <- as.numeric(cars["name"])
+
+    # Parse date strings
+    hdf <- h2o.importFile(
+        "https://s3.amazonaws.com/h2o-public-test-data/smalldata/jira/v-11-eurodate.csv"
+    )
+    h2o.as_date(hdf["ds5"], c("%d.%m.%y %H:%M"))
+
+    # Extract date parts
+    h2o.year(hdf["ds3"])
+    h2o.month(hdf["ds3"])
+    h2o.dayOfWeek(hdf["ds3"])
+    h2o.hour(hdf["ds3"])
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+When converting an `enum` (factor) column to numeric, always go through `ascharacter()` / `as.character()` first. Direct conversion maps to underlying factor integer codes, not the original values.
+</Warning>

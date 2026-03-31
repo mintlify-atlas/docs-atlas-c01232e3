@@ -1,0 +1,203 @@
+---
+title: "Hadoop & Spark"
+description: "Run H2O on YARN/Hadoop clusters and Apache Spark with Sparkling Water, including cloud integrations for AWS EMR, Azure HDInsight, and GCP Dataproc."
+keywords: ["Hadoop", "YARN", "Spark", "Sparkling Water", "h2odriver", "EMR", "HDInsight", "Dataproc", "distributed"]
+---
+
+H2O can run as a YARN application on Hadoop clusters, giving it access to HDFS data and cluster resources. For Spark environments, Sparkling Water embeds H2O inside a Spark context.
+
+## Prerequisites
+
+- At least **6 GB of memory** allocated per H2O node
+- Open communication on the H2O ports (default **54321** and **54322** TCP)
+- The `h2odriver.jar` for your Hadoop distribution
+
+<Warning>
+Each H2O node runs as a single mapper. Run only one mapper per physical host — YARN may place two mappers on the same host if resources are tight, so open a range of at least 20 ports around 54321 to allow adaptive port selection.
+</Warning>
+
+---
+
+## Running H2O on YARN/Hadoop
+
+<Steps>
+  <Step title="Download the H2O Hadoop distribution">
+    Download the H2O build for your Hadoop version from [h2o.ai/download](https://www.h2o.ai/download). Supported distributions include CDH 5.x, HDP 2.x, and MapR 4.x/5.x, as well as AWS EMR.
+
+    ```bash
+    unzip h2o-<version>-*.zip
+    cd h2o-<version>-*
+    ```
+  </Step>
+
+  <Step title="Launch H2O on the cluster">
+    ```bash
+    hadoop jar h2odriver.jar -nodes 3 -mapperXmx 6g -output hdfsOutputDirName
+    ```
+
+    Key flags:
+    - `-nodes` — number of H2O nodes (mappers) to launch
+    - `-mapperXmx` — heap size per node (minimum `6g`; recommended: 4× your dataset size)
+    - `-output` — unique HDFS output directory name (must be unique per run)
+
+    When the cluster forms, you will see:
+
+    ```
+    H2O cluster (3 nodes) is up
+    Open H2O Flow in your web browser: http://172.16.2.184:54321
+    ```
+  </Step>
+
+  <Step title="Connect from Python or R">
+    <CodeGroup>
+
+    ```python Python
+    import h2o
+    h2o.init(ip="172.16.2.184", port=54321)
+    ```
+
+    ```r R
+    library(h2o)
+    h2o.init(ip = "172.16.2.184", port = 54321)
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+---
+
+## Hadoop launch parameters reference
+
+<AccordionGroup>
+  <Accordion title="Cluster sizing">
+    | Parameter | Description |
+    |---|---|
+    | `-nodes <N>` | Number of H2O nodes to launch |
+    | `-mapperXmx <Xg>` | Heap size per mapper (minimum `6g`) |
+    | `-extramempercent <0-20>` | Extra JVM memory as a percentage of `-mapperXmx` |
+    | `-nthreads <N>` | CPUs per node; `-1` uses all available |
+  </Accordion>
+
+  <Accordion title="Networking">
+    | Parameter | Description |
+    |---|---|
+    | `-baseport <port>` | Starting port for H2O nodes (default `54321`) |
+    | `-driverport <port>` | Port for mapper-to-driver callback |
+    | `-driverportrange <portX-portY>` | Allowed range for driver callback port |
+    | `-network <CIDR>` | Bind H2O to a specific IPv4 network, e.g. `10.1.2.0/24` |
+  </Accordion>
+
+  <Accordion title="Security and identity">
+    | Parameter | Description |
+    |---|---|
+    | `-principal <kerberos principal>` | Kerberos principal for authentication |
+    | `-keytab <path>` | Path to Kerberos keytab |
+    | `-run_as_user <username>` | Start cluster on behalf of a Hadoop user (non-Kerberos clusters) |
+    | `-jks <filename>` | Java keystore for TLS |
+    | `-jks_pass <password>` | Keystore password (default `h2oh2o`) |
+  </Accordion>
+
+  <Accordion title="Output and flow">
+    | Parameter | Description |
+    |---|---|
+    | `-output <HDFS dir>` | Required. HDFS output directory (must be unique per run) |
+    | `-flow_dir <dir>` | Directory for saving H2O Flow notebooks on HDFS |
+    | `-notify <file>` | Write the cluster's IP:port to a file when ready |
+    | `-disown` | Exit the driver after the cluster forms |
+    | `-timeout <seconds>` | Time to wait for cluster formation (default `120`) |
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Accessing S3 data from Hadoop
+
+H2O launched on YARN can read from S3 as well as HDFS. Configure S3 access in Hadoop's `core-site.xml` and set `HADOOP_CONF_DIR` to point to that directory before launching H2O.
+
+<Note>
+No changes to H2O's launch command are needed — S3 access flows through Hadoop's standard credential chain once `core-site.xml` is configured.
+</Note>
+
+---
+
+## Sparkling Water: H2O on Apache Spark
+
+[Sparkling Water](https://github.com/h2oai/sparkling-water) runs an H2O cluster inside a Spark application. H2O and Spark share the same JVMs, enabling zero-copy data exchange between H2O frames and Spark DataFrames.
+
+### Starting Sparkling Water
+
+```bash
+$SPARK_HOME/bin/sparkling-shell \
+    --conf spark.executor.memory=4g \
+    --conf spark.driver.memory=2g
+```
+
+From the Spark shell:
+
+```scala Scala
+import org.apache.spark.h2o._
+val hc = H2OContext.getOrCreate()
+println(hc.flowURL())  // Opens H2O Flow UI
+```
+
+### Data exchange between H2O and Spark
+
+<CodeGroup>
+
+```scala Spark DataFrame → H2O Frame
+// Convert Spark DataFrame to H2O Frame
+val sparkDF = spark.read.parquet("hdfs://data/train.parquet")
+val h2oFrame = hc.asH2OFrame(sparkDF)
+```
+
+```scala H2O Frame → Spark DataFrame
+// Convert H2O Frame back to Spark DataFrame for downstream use
+val predictions = model.score(h2oFrame)
+val sparkPredictions = hc.asDataFrame(predictions)
+```
+
+</CodeGroup>
+
+<Tip>
+Train with H2O for its algorithm performance (especially GBM and AutoML), then convert predictions back to Spark DataFrames to integrate with your existing Spark pipelines.
+</Tip>
+
+### TLS with Sparkling Water
+
+```bash
+$SPARK_HOME/bin/spark-submit \
+    --class water.SparklingWaterDriver \
+    --conf spark.ext.h2o.jks=/path/to/h2o.jks \
+    --conf spark.ext.h2o.jks.pass=mypassword \
+    sparkling-water-assembly-all.jar
+```
+
+---
+
+## Cloud integrations
+
+### AWS EMR
+
+H2O provides a pre-built distribution for Amazon EMR. Download the EMR-specific build from the H2O download page, then launch with the standard `hadoop jar h2odriver.jar` command from the EMR master node.
+
+For S3-backed data, assign an IAM role with S3 read permissions to the EMR cluster — no additional configuration is needed.
+
+### Azure HDInsight
+
+Use the HDInsight-compatible H2O distribution. Launch from the HDInsight head node with the `hadoop jar` command. Azure Blob Storage (WASB) can be accessed the same way as S3 once the cluster's `core-site.xml` is configured with the WASB connector.
+
+### GCP Dataproc
+
+H2O runs on Dataproc as a YARN application. Use a Dataproc initialization action script to install H2O on all nodes, then submit the `hadoop jar h2odriver.jar` command from the master.
+
+```bash Dataproc init action
+#!/bin/bash
+HADOOP_VERSION=$(hadoop version | head -1 | awk '{print $2}')
+wget -q "https://h2o-release.s3.amazonaws.com/h2o/latest_stable_Hadoop.zip" -O /tmp/h2o-hadoop.zip
+unzip -q /tmp/h2o-hadoop.zip -d /opt/h2o-hadoop
+```
+
+<Note>
+GCS data access uses the Cloud Storage connector bundled with Dataproc — no extra H2O configuration needed beyond standard Hadoop GCS setup.
+</Note>

@@ -1,0 +1,118 @@
+---
+title: "Algorithm Overview"
+description: "A guide to all supervised and unsupervised machine learning algorithms available in H2O-3, with guidance on choosing the right one for your problem."
+---
+
+H2O-3 provides a broad set of distributed machine learning algorithms covering supervised learning (regression and classification), unsupervised learning (clustering and dimensionality reduction), and meta-learning (ensembles). All algorithms run on H2O's distributed in-memory computing engine and export to MOJO/POJO for production scoring.
+
+## Supported Algorithms
+
+| Algorithm | Class (Python) | Task | MOJO |
+|-----------|---------------|------|------|
+| Gradient Boosting Machine | `H2OGradientBoostingEstimator` | Regression, Classification | Yes |
+| XGBoost | `H2OXGBoostEstimator` | Regression, Classification | Yes |
+| Distributed Random Forest | `H2ORandomForestEstimator` | Regression, Classification | Yes |
+| Deep Learning | `H2ODeepLearningEstimator` | Regression, Classification | Yes |
+| Generalized Linear Model | `H2OGeneralizedLinearEstimator` | Regression, Classification | Yes |
+| Generalized Additive Model | `H2OGeneralizedAdditiveEstimator` | Regression, Classification | Yes |
+| Stacked Ensembles | `H2OStackedEnsembleEstimator` | Regression, Classification | Yes |
+| K-Means | `H2OKMeansEstimator` | Clustering | Export only |
+| PCA | `H2OPrincipalComponentAnalysisEstimator` | Dimensionality Reduction | Export only |
+| Naive Bayes | `H2ONaiveBayesEstimator` | Classification | Yes |
+| Isolation Forest | `H2OIsolationForestEstimator` | Anomaly Detection | Yes |
+| AutoML | `H2OAutoML` | All supervised | — |
+
+---
+
+## Choosing the Right Algorithm
+
+### By Problem Type
+
+<Tabs>
+  <Tab title="Regression">
+    For predicting a continuous numeric value:
+
+    - **GBM / XGBoost** — best general-purpose accuracy; XGBoost can be faster on large tabular data with GPU support.
+    - **GLM** — best when you need a linear, interpretable model or a regularized baseline (elastic net with Gaussian family).
+    - **Deep Learning** — useful for very large datasets or complex feature interactions, but requires more tuning.
+    - **DRF** — strong out-of-the-box baseline; naturally handles missing values and mixed types.
+    - **AutoML** — try all of the above automatically and rank by RMSE/deviance.
+  </Tab>
+  <Tab title="Binary Classification">
+    For predicting a two-class outcome (0/1, yes/no):
+
+    - **GBM / XGBoost** — top performers on tabular data; tune `max_depth`, `learn_rate`, `ntrees`.
+    - **GLM (binomial)** — logistic regression with elastic net regularization; highly interpretable.
+    - **DRF** — robust and fast; good starting point.
+    - **Deep Learning** — competitive on large datasets; use dropout for regularization.
+    - **Stacked Ensembles** — combine the above for maximum AUC.
+  </Tab>
+  <Tab title="Multiclass Classification">
+    For predicting one of three or more classes:
+
+    - **GBM / XGBoost** — strong defaults; `distribution="multinomial"`.
+    - **GLM (multinomial)** — linear baseline; fast to train.
+    - **Deep Learning** — handles high cardinality well via embedding.
+    - **DRF** — builds one tree per class; robust.
+  </Tab>
+  <Tab title="Clustering">
+    For discovering hidden groupings without labels:
+
+    - **K-Means** — standard centroid-based clustering; fast and scalable.
+    - **PCA** — preprocess data before clustering to reduce noise and dimensionality.
+  </Tab>
+</Tabs>
+
+### By Data Characteristics
+
+| Characteristic | Recommended Algorithm(s) |
+|----------------|--------------------------|
+| Small dataset (< 10k rows) | GLM, DRF, GBM |
+| Large dataset (> 1M rows) | XGBoost (GPU), GBM, DRF |
+| Many categorical features | GBM (native enum encoding), DRF |
+| Sparse / high-dimensional data | GLM (lasso), Deep Learning |
+| Time-series / sequential | GBM with monotone constraints |
+| Need fast inference (MOJO) | GBM, XGBoost, DRF, GLM |
+| Need model explainability | GLM, GBM (SHAP contributions), DRF (variable importance) |
+| Missing values | GBM, DRF (handle natively) |
+
+### By Interpretability Need
+
+<Note>
+  H2O-3 supports SHAP (Shapley Additive Explanations) contributions for tree-based models (GBM, XGBoost, DRF) and variable importance for all supervised models. Use `model.explain()` on any trained model or AutoML object for an automatic explainability report.
+</Note>
+
+| Interpretability Level | Algorithms |
+|------------------------|-----------|
+| Fully interpretable | GLM, GAM |
+| Variable importance | GBM, XGBoost, DRF, Deep Learning |
+| SHAP contributions | GBM, XGBoost, DRF |
+| Black-box | Deep Learning, Stacked Ensembles |
+
+---
+
+## Algorithm Pages
+
+<CardGroup cols={2}>
+  <Card title="AutoML" icon="wand-magic-sparkles" href="/algorithms/automl">
+    Automatically train and rank multiple models with a single function call.
+  </Card>
+  <Card title="GBM & XGBoost" icon="chart-line" href="/algorithms/gbm-xgboost">
+    Gradient boosted trees — H2O's native GBM and the XGBoost backend.
+  </Card>
+  <Card title="Distributed Random Forest" icon="tree" href="/algorithms/random-forest">
+    Bagged ensembles of decision trees with column and row subsampling.
+  </Card>
+  <Card title="Deep Learning" icon="brain" href="/algorithms/deep-learning">
+    Multi-layer feedforward neural networks with adaptive learning rates.
+  </Card>
+  <Card title="GLM & GAM" icon="function" href="/algorithms/glm-gam">
+    Regularized linear models (elastic net) and generalized additive models.
+  </Card>
+  <Card title="Stacked Ensembles" icon="layer-group" href="/algorithms/stacked-ensembles">
+    Super-learner ensembles that combine cross-validated base model predictions.
+  </Card>
+  <Card title="Clustering & Dimensionality Reduction" icon="circle-nodes" href="/algorithms/clustering-dimensionality">
+    K-Means clustering and PCA for unsupervised learning.
+  </Card>
+</CardGroup>

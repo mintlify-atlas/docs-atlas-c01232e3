@@ -1,0 +1,227 @@
+---
+title: "Data structures"
+description: "The core in-memory data structures H2O-3 uses to store and distribute tabular data."
+keywords: ["H2OFrame", "Vec", "Chunk", "data types", "categorical", "numeric", "distributed"]
+---
+
+H2O-3 organizes tabular data into three nested structures: **Frame**, **Vec**, and **Chunk**. Understanding this hierarchy helps you write efficient code and reason about how data is distributed across a cluster.
+
+## The Frame / Vec / Chunk hierarchy
+
+```
+Frame  (table: rows × columns)
+ └── Vec  (one per column — distributed across nodes)
+      └── Chunk  (contiguous row block — lives on a single node)
+```
+
+### H2OFrame
+
+`H2OFrame` is the primary 2D data structure in H2O-3. It is analogous to a pandas `DataFrame` or an R `data.frame`, but the data lives in the H2O cluster, not in client memory. An `H2OFrame` object in Python or R is a lightweight handle to that remote data.
+
+```python
+import h2o
+h2o.init()
+
+# From a Python list/dict
+frame = h2o.H2OFrame({"x": [1, 2, 3], "label": ["a", "b", "a"]})
+
+# From a pandas DataFrame
+import pandas as pd
+pandas_df = pd.DataFrame({"x": [1.0, 2.0], "y": [3.0, 4.0]})
+h2o_frame = h2o.H2OFrame(pandas_df)
+```
+
+```r
+library(h2o)
+h2o.init()
+
+# From an R data.frame
+r_df <- data.frame(x = c(1, 2, 3), label = c("a", "b", "a"))
+h2o_frame <- as.h2o(r_df)
+```
+
+<Note>
+Data is not held in the Python or R process. The `H2OFrame` object contains a reference (`key`) to the data stored in the cluster's distributed key-value store (DKV).
+</Note>
+
+### Vec
+
+A `Vec` is a single distributed column. Conceptually it is a database column, but the data is split into `Chunk`s and spread across nodes. All Vecs in a Frame share a `VectorGroup`, which guarantees that same-numbered chunks across all columns cover the same row ranges.
+
+You generally do not interact with `Vec` directly in Python or R — it is an internal Java class (`water.fvec.Vec`).
+
+### Chunk
+
+A `Chunk` is a contiguous block of rows within a single Vec, stored entirely on one node. Chunks typically hold between 1,000 and 1,000,000 rows. MRTask computations operate on one Chunk at a time, on the node where the Chunk lives, avoiding network data movement.
+
+## Supported column types
+
+H2O-3 supports the following column types:
+
+| Type | Description | Python alias | R alias |
+|---|---|---|---|
+| **numeric** | 64-bit floating point (covers int and real) | `"numeric"` | `numeric` |
+| **categorical** / **enum** | Factor with an internal integer encoding | `"enum"` or `"factor"` | `factor` |
+| **string** | Variable-length text | `"string"` | `character` |
+| **time** | Unix timestamp in milliseconds | `"time"` | `POSIXct` |
+| **uuid** | 128-bit identifier | `"uuid"` | — |
+
+<Warning>
+Algorithms treat `enum`/`factor` columns as classification targets and `numeric` columns as regression targets. If your target column is stored as numeric but represents classes, convert it with `asfactor()` / `as.factor()` before training.
+</Warning>
+
+## How data is distributed
+
+When you import a file or create a Frame, H2O-3 divides the data into Chunks and distributes them across nodes. The distribution is determined by consistent hashing of the Vec's `Key`. The chunk size is chosen automatically based on available memory and cluster size.
+
+Each node holds a roughly equal share of each column. Because chunk alignment is guaranteed by the `VectorGroup`, processing a row requires reading the same-indexed chunk from each Vec — all on the same node.
+
+## Key operations
+
+### Dimensions and structure
+
+<CodeGroup>
+
+```python Python
+df.nrow         # number of rows
+df.ncol         # number of columns
+df.shape        # (nrow, ncol) tuple
+df.columns      # list of column names
+df.dtypes       # dict of {column: type}
+```
+
+```r R
+nrow(df)            # number of rows
+ncol(df)            # number of columns
+dim(df)             # c(nrow, ncol)
+colnames(df)        # character vector of column names
+h2o.names(df)       # same as colnames
+```
+
+</CodeGroup>
+
+### Summary statistics
+
+<CodeGroup>
+
+```python Python
+df.describe()       # count, mean, std, min, max for each column
+df.summary()        # same as describe
+df.head(10)         # first 10 rows
+df.tail(5)          # last 5 rows
+```
+
+```r R
+summary(df)         # per-column statistics
+h2o.describe(df)    # detailed per-column description
+head(df, 10)        # first 10 rows
+tail(df, 5)         # last 5 rows
+```
+
+</CodeGroup>
+
+### Column types
+
+<CodeGroup>
+
+```python Python
+df["col"].type          # e.g. "numeric", "enum", "string"
+df["col"].isfactor()    # True if categorical
+df["col"].isnumeric()   # True if numeric
+
+# Convert column type
+df["col"] = df["col"].asfactor()    # to categorical
+df["col"] = df["col"].asnumeric()   # to numeric
+```
+
+```r R
+h2o.isfactor(df["col"])     # TRUE if categorical
+h2o.isnumeric(df["col"])    # TRUE if numeric
+
+# Convert column type
+df["col"] <- as.factor(df["col"])   # to categorical
+df["col"] <- as.numeric(df["col"])  # to numeric
+```
+
+</CodeGroup>
+
+## Converting to and from pandas / R data.frame
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import h2o
+    import pandas as pd
+    h2o.init()
+
+    # pandas → H2OFrame
+    pandas_df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+    h2o_frame = h2o.H2OFrame(pandas_df)
+
+    # H2OFrame → pandas
+    # Pulls all data from the cluster into local memory — use with care on large frames
+    back_to_pandas = h2o_frame.as_data_frame()
+    ```
+
+    <Warning>
+    `as_data_frame()` transfers the entire frame from the cluster to your local Python process. Only use this for small frames or subsets.
+    </Warning>
+  </Tab>
+  <Tab title="R">
+    ```r
+    library(h2o)
+    h2o.init()
+
+    # R data.frame → H2OFrame
+    r_df <- data.frame(a = c(1, 2, 3), b = c("x", "y", "z"),
+                       stringsAsFactors = FALSE)
+    h2o_frame <- as.h2o(r_df)
+
+    # H2OFrame → R data.frame
+    # Pulls all data from the cluster into local memory
+    back_to_r <- as.data.frame(h2o_frame)
+    ```
+
+    <Warning>
+    `as.data.frame()` transfers the entire frame to the R process. Avoid this for large datasets.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Creating frames directly
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init()
+
+# From a list (single column)
+frame = h2o.H2OFrame([1, 2, 2.5, -100.9, 0])
+
+# From a dict (multiple columns)
+frame = h2o.H2OFrame({
+    "age":    [25, 30, 35],
+    "salary": [50000, 60000, 75000],
+    "dept":   ["eng", "sales", "eng"]
+})
+
+# From a list of lists (rows)
+frame = h2o.H2OFrame([[1, "a"], [2, "b"], [3, "c"]],
+                     column_names=["id", "label"])
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# From a data.frame
+frame <- as.h2o(data.frame(
+  age    = c(25L, 30L, 35L),
+  salary = c(50000, 60000, 75000),
+  dept   = c("eng", "sales", "eng"),
+  stringsAsFactors = FALSE
+))
+```
+
+</CodeGroup>

@@ -1,0 +1,227 @@
+---
+title: "REST API Overview"
+description: "Use the H2O-3 REST API to manage frames, train models, run AutoML, and retrieve predictions from any HTTP client."
+keywords: ["H2O REST API", "H2O API", "h2o curl", "h2o HTTP"]
+---
+
+H2O-3 exposes a JSON REST API that all clients (R, Python, Flow) use internally. You can call it directly from any HTTP client to automate workflows, integrate H2O into external systems, or debug issues.
+
+## Base URL
+
+```
+http://<host>:<port>
+```
+
+The default local address is:
+
+```
+http://localhost:54321
+```
+
+<Note>
+  H2O does not use TLS by default. To enable HTTPS, start H2O with `-jks <keystore>` and `-jks_pass <password>`. All examples on this page use plain HTTP against a local instance.
+</Note>
+
+---
+
+## API versioning
+
+All stable endpoints are prefixed with `/3/`:
+
+```
+http://localhost:54321/3/Frames
+http://localhost:54321/3/Models
+http://localhost:54321/3/Jobs
+```
+
+A subset of newer endpoints uses `/4/`. The older `/1/` and `/2/` prefixes are deprecated. Use `/3/` for all production usage.
+
+---
+
+## Authentication
+
+Authentication is optional and disabled by default. When H2O is started with a hash file (`-hash_login` or `-ldap_login`), all API requests must include HTTP Basic credentials:
+
+```bash
+curl -u admin:password http://localhost:54321/3/Frames
+```
+
+When authentication is enabled, it applies to the REST API, the Flow UI, and all client connections equally.
+
+---
+
+## Request and response format
+
+All requests and responses use JSON. Set the `Content-Type` header to `application/json` for requests with a body.
+
+### Common response fields
+
+<ResponseField name="__meta" type="object">
+  Metadata about the response schema and version.
+  <Expandable title="properties">
+    <ResponseField name="schema_name" type="string">
+      Name of the response schema class.
+    </ResponseField>
+    <ResponseField name="schema_version" type="number">
+      API version number (e.g., `3`).
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="error_count" type="number">
+  Number of errors encountered. `0` means the request succeeded.
+</ResponseField>
+
+<ResponseField name="messages" type="object[]">
+  Validation messages, warnings, or errors. Check this even when `error_count` is `0` for warnings.
+</ResponseField>
+
+### Job response fields
+
+Long-running operations (model training, frame parsing) return a job reference:
+
+<ResponseField name="job" type="object">
+  <Expandable title="properties">
+    <ResponseField name="key" type="object">
+      Job identifier. Use the `name` field as the `job_id`.
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Job key string used to poll status at `GET /3/Jobs/{job_id}`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="status" type="string">
+      Current job state: `CREATED`, `RUNNING`, `DONE`, `CANCELLED`, `FAILED`.
+    </ResponseField>
+    <ResponseField name="progress" type="number">
+      Training progress from 0.0 to 1.0.
+    </ResponseField>
+    <ResponseField name="exception" type="string">
+      Error message if the job failed.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+## Exploring the API
+
+### List all endpoints
+
+```bash
+curl -s http://localhost:54321/3/Metadata/endpoints | python3 -m json.tool
+```
+
+This returns every registered route, its HTTP method, handler class, and parameter schema. It is the canonical reference for endpoint discovery.
+
+### Inspect a schema
+
+```bash
+curl -s http://localhost:54321/3/Metadata/schemas/FrameV3 | python3 -m json.tool
+```
+
+---
+
+## Key resource types
+
+| Resource | Path prefix | Description |
+|----------|-------------|-------------|
+| Frames | `/3/Frames` | Distributed data frames stored in H2O |
+| Models | `/3/Models` | Trained model objects |
+| Jobs | `/3/Jobs` | Asynchronous operation status |
+| ModelBuilders | `/3/ModelBuilders` | Schema definitions for training parameters |
+| AutoML | `/3/AutoML` | Automated machine learning runs |
+| Grid | `/3/Grid` | Hyperparameter search results |
+| Predictions | `/3/Predictions` | Model scoring endpoints |
+
+---
+
+## Basic workflow examples
+
+### 1. Check cluster health
+
+```bash
+curl -s http://localhost:54321/3/Cloud
+```
+
+### 2. Import a file
+
+```bash
+curl -s "http://localhost:54321/3/ImportFiles?path=/data/train.csv"
+```
+
+### 3. Parse a raw file into a frame
+
+```bash
+# First, get parse setup defaults
+curl -s -X POST http://localhost:54321/3/ParseSetup \
+  -H "Content-Type: application/json" \
+  -d '{"source_frames": [{"name": "/data/train.csv"}]}'
+
+# Then parse (use values from ParseSetup response)
+curl -s -X POST http://localhost:54321/3/Parse \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_frames": [{"name": "/data/train.csv"}],
+    "destination_frame": "train_frame",
+    "parse_type": "CSV",
+    "separator": 44,
+    "header": 1
+  }'
+```
+
+### 4. Train a GBM model
+
+```bash
+curl -s -X POST http://localhost:54321/3/ModelBuilders/gbm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "training_frame": "train_frame",
+    "response_column": {"column_name": "label"},
+    "ntrees": 50,
+    "max_depth": 5,
+    "learn_rate": 0.1
+  }'
+```
+
+### 5. Poll job status
+
+```bash
+# Replace JOB_KEY with the key.name from the training response
+curl -s "http://localhost:54321/3/Jobs/JOB_KEY"
+```
+
+### 6. Score a frame
+
+```bash
+curl -s -X POST \
+  "http://localhost:54321/3/Predictions/models/my_gbm_model/frames/test_frame"
+```
+
+---
+
+## Asynchronous execution model
+
+Most operations that modify state (training, parsing, AutoML) are asynchronous. They immediately return a `job` object. Poll `GET /3/Jobs/{job_id}` until `status` is `DONE` or `FAILED`.
+
+```bash
+# Start training
+RESPONSE=$(curl -s -X POST http://localhost:54321/3/ModelBuilders/gbm \
+  -H "Content-Type: application/json" \
+  -d '{"training_frame":"train_frame","response_column":{"column_name":"label"}}')
+
+JOB_KEY=$(echo $RESPONSE | python3 -c "import sys,json; print(json.load(sys.stdin)['job']['key']['name'])")
+
+# Poll until done
+while true; do
+  STATUS=$(curl -s "http://localhost:54321/3/Jobs/$JOB_KEY" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobs'][0]['status'])")
+  echo "Status: $STATUS"
+  [ "$STATUS" = "DONE" ] && break
+  [ "$STATUS" = "FAILED" ] && echo "Job failed" && break
+  sleep 2
+done
+```
+
+<Tip>
+  The R and Python clients handle job polling automatically. Direct REST usage requires polling `GET /3/Jobs/{job_id}` in a loop.
+</Tip>

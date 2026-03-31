@@ -1,0 +1,173 @@
+---
+title: "Distributed Random Forest"
+description: "H2O-3's Distributed Random Forest (DRF) builds an ensemble of classification or regression trees on random row and column subsets for robust, low-variance predictions."
+---
+
+Distributed Random Forest (DRF) is a powerful classification and regression algorithm. Given a dataset, DRF generates a **forest of decision trees** rather than a single tree. Each tree is a weak learner built on a random subset of rows and columns (controlled by `sample_rate` and `mtries`). The final prediction averages all trees, reducing variance without increasing bias.
+
+DRF supports both classification (majority vote) and regression (average prediction), per-row observation weights, N-fold cross-validation, and produces calibrated probabilities.
+
+**MOJO Support:** DRF fully supports importing and exporting MOJOs.
+
+---
+
+## Extremely Randomized Trees (XRT)
+
+H2O-3 supports Extremely Randomized Trees via `histogram_type="Random"`. Unlike standard DRF where the best threshold is found for each candidate feature, XRT draws split thresholds at random, further reducing variance at the cost of a small bias increase. Enable it by setting:
+
+```python
+drf = H2ORandomForestEstimator(histogram_type="Random")
+```
+
+---
+
+## Key Parameters
+
+<ParamField path="ntrees" type="int" default="50">
+  Number of trees in the forest. More trees reduce variance but increase training time. Unlike GBM, DRF does not overfit badly with more trees — test accuracy plateaus rather than degrades.
+</ParamField>
+
+<ParamField path="max_depth" type="int" default="20">
+  Maximum tree depth. DRF uses deeper trees than GBM by default (`20` vs `5`) because averaging reduces the overfitting risk of individual deep trees.
+</ParamField>
+
+<ParamField path="mtries" type="int" default="-1">
+  Number of columns randomly sampled at each split. `-1` uses the square root of the number of columns for classification and `p/3` for regression (standard random forest defaults). `-2` uses all features (equivalent to bagging). Any value `>= 1` sets the exact count.
+</ParamField>
+
+<ParamField path="sample_rate" type="float" default="0.632">
+  Row subsampling rate per tree (without replacement). The default `0.632` is the classic bootstrap approximation. Reducing this value adds more randomness and can improve generalization on noisy data.
+</ParamField>
+
+<ParamField path="min_rows" type="float" default="1.0">
+  Minimum observations required in a leaf node. Increase to smooth predictions on small datasets. R parameter name: `node_size`.
+</ParamField>
+
+<ParamField path="nbins" type="int" default="20">
+  Number of histogram bins for numerical columns. More bins capture finer split points but increase memory and training time.
+</ParamField>
+
+<ParamField path="nbins_cats" type="int" default="1024">
+  Maximum bins for categorical columns. Higher values allow finer splits on high-cardinality categoricals.
+</ParamField>
+
+<ParamField path="histogram_type" type="str" default="AUTO">
+  Split-finding strategy: `"AUTO"`, `"UniformAdaptive"`, `"UniformRobust"`, `"Random"` (XRT), `"QuantilesGlobal"`, `"RoundRobin"`.
+</ParamField>
+
+<ParamField path="binomial_double_trees" type="bool" default="False">
+  Binary classification only. Build twice as many trees (one per class). Can improve accuracy at the cost of doubled training time.
+</ParamField>
+
+---
+
+## Code Examples
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.random_forest import H2ORandomForestEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [c for c in train.columns if c != y]
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+drf = H2ORandomForestEstimator(
+    ntrees=100,
+    max_depth=20,
+    mtries=-1,          # sqrt(p) for classification
+    sample_rate=0.632,
+    stopping_rounds=5,
+    stopping_metric="AUC",
+    seed=42
+)
+drf.train(x=x, y=y, training_frame=train, validation_frame=test)
+
+# Variable importance
+vi = drf.varimp(use_pandas=True)
+print(vi.head(10))
+
+print(drf.auc(valid=True))
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+drf <- h2o.randomForest(
+  x = x, y = y,
+  training_frame = train,
+  validation_frame = test,
+  ntrees = 100,
+  max_depth = 20,
+  mtries = -1,
+  sample_rate = 0.632,
+  stopping_rounds = 5,
+  stopping_metric = "AUC",
+  seed = 42
+)
+
+# Variable importance
+h2o.varimp_plot(drf)
+h2o.auc(drf, valid = TRUE)
+```
+
+</CodeGroup>
+
+---
+
+## Variable Importance
+
+DRF computes variable importance based on mean decrease in squared error across all splits that use each feature. Access it as follows:
+
+```python Python
+# As a data frame (pandas)
+vi = drf.varimp(use_pandas=True)
+print(vi[["variable", "relative_importance", "scaled_importance", "percentage"]].head(20))
+
+# Plot
+drf.varimp_plot()
+```
+
+```r R
+# Print
+h2o.varimp(drf)
+
+# Plot
+h2o.varimp_plot(drf)
+```
+
+<Tip>
+  Variable importance in DRF is computed from the training data. For a more reliable estimate of feature relevance, use SHAP (Shapley) contributions via `drf.predict_contributions(test)` in Python or `h2o.predict_contributions(drf, test)` in R. SHAP provides per-row, per-feature attribution rather than a global average.
+</Tip>
+
+---
+
+## DRF vs GBM
+
+| Property | DRF | GBM |
+|----------|-----|-----|
+| Training strategy | Parallel (bagging) | Sequential (boosting) |
+| Default `max_depth` | 20 | 5 |
+| Default `sample_rate` | 0.632 | 1.0 |
+| Overfitting risk with many trees | Low (variance reduces) | Moderate (use early stopping) |
+| Tuning effort | Low | Higher |
+| Typical AUC | Good baseline | Slightly higher ceiling |
+| Training time | Faster (fully parallel) | Slower (sequential) |
+
+DRF is an excellent **first-pass model** and a strong baseline with minimal tuning. GBM and XGBoost typically achieve slightly higher accuracy with proper hyperparameter search.

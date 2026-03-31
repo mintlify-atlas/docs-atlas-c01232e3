@@ -1,0 +1,276 @@
+---
+title: "Installation"
+description: "Install H2O-3 via pip, conda, CRAN, or download the standalone jar. Covers requirements, verification, and Hadoop/Spark setup."
+keywords: ["h2o", "install", "pip", "conda", "cran", "java", "hadoop", "spark"]
+---
+
+H2O-3 runs on Java. You must have a supported JRE installed before using the Python or R packages, the standalone jar, or any other distribution. The client libraries (`h2o` for Python, `h2o` for R) communicate with the H2O-3 backend over HTTP and do not embed Java themselves.
+
+## Requirements
+
+| Component | Minimum version |
+|-----------|----------------|
+| Java (JRE) | Java SE 8 (64-bit) |
+| Python | 3.7, 3.8, 3.9, 3.10, or 3.11 |
+| R | 3.1 or later |
+| Operating system | Windows 7+, macOS 10.9+, Ubuntu 12.04+, RHEL/CentOS 6+ |
+
+<Warning>
+  H2O-3 requires **64-bit Java**. The 64-bit JDK is required to build H2O-3 or run tests. The 64-bit JRE is sufficient to run the H2O-3 binary or the Python/R packages. H2O-3 supports Java SE 8 through 17.
+</Warning>
+
+H2O-3 also requires `numpy<2`. If you have `numpy` 2 installed, run:
+
+```bash
+pip install --force-reinstall 'numpy<2'
+```
+
+## Install in Python
+
+<Steps>
+  <Step title="Install via pip">
+    The simplest installation method is pip. This installs the latest stable release.
+
+    ```bash
+    pip install h2o
+    ```
+
+    To upgrade an existing installation:
+
+    ```bash
+    pip install --upgrade h2o
+    ```
+  </Step>
+
+  <Step title="Install via conda (Anaconda)">
+    Install H2O-3 from the `h2oai` conda channel. Leave the version blank to get the latest release.
+
+    ```bash
+    conda install -c h2oai h2o
+    ```
+
+    For Python 3.6+ users, the `tabulate` dependency is available through the `conda-forge` channel. Add it before installing:
+
+    ```bash
+    conda create -n h2o_env python=3.9 anaconda
+    source activate h2o_env
+    conda config --append channels conda-forge
+    conda install -c h2oai h2o
+    ```
+  </Step>
+
+  <Step title="Install a specific stable version">
+    To install directly from the H2O release server (guarantees the latest stable version, which may lag behind on PyPI):
+
+    ```bash
+    pip install -f http://h2o-release.s3.amazonaws.com/h2o/latest_stable_Py.html h2o
+    ```
+  </Step>
+
+  <Step title="Verify the installation">
+    Start Python and initialize H2O-3. A successful connection prints the cluster status table.
+
+    ```python
+    import h2o
+    h2o.init()
+    ```
+
+    Expected output includes lines similar to:
+
+    ```
+    H2O cluster version:        3.47.0
+    H2O cluster total nodes:    1
+    H2O cluster free memory:    X Gb
+    H2O cluster total cores:    N
+    H2O cluster status:         accepting new members, healthy
+    H2O connection url:         http://127.0.0.1:54321
+    ```
+  </Step>
+</Steps>
+
+## Install in R
+
+<Steps>
+  <Step title="Remove any existing H2O-3 installation">
+    If you have a previous version installed, remove it first to avoid conflicts.
+
+    ```r
+    if ("package:h2o" %in% search()) { detach("package:h2o", unload = TRUE) }
+    if ("h2o" %in% rownames(installed.packages())) { remove.packages("h2o") }
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install the packages that H2O-3 depends on.
+
+    ```r
+    pkgs <- c("RCurl", "jsonlite")
+    for (pkg in pkgs) {
+      if (!(pkg %in% rownames(installed.packages()))) { install.packages(pkg) }
+    }
+    ```
+  </Step>
+
+  <Step title="Install from CRAN">
+    Install the latest version of H2O-3 from CRAN.
+
+    ```r
+    install.packages("h2o")
+    ```
+
+    <Note>
+      The CRAN release may lag slightly behind the latest stable version. To guarantee the latest stable release, install directly from the H2O release server instead:
+
+      ```r
+      install.packages(
+        "h2o",
+        type   = "source",
+        repos  = c("http://h2o-release.s3.amazonaws.com/h2o/latest_stable_R")
+      )
+      ```
+    </Note>
+  </Step>
+
+  <Step title="Verify the installation">
+    Load the package and initialize H2O-3.
+
+    ```r
+    library(h2o)
+    h2o.init()
+    ```
+
+    Successful output includes:
+
+    ```
+    R is connected to the H2O cluster:
+      H2O cluster version:        3.47.0
+      H2O cluster total nodes:    1
+      H2O cluster total memory:   X.XX GB
+      H2O cluster healthy:        TRUE
+      H2O connection ip:          localhost
+      H2O connection port:        54321
+    ```
+  </Step>
+</Steps>
+
+## Download the standalone H2O jar
+
+Use the standalone jar when you want to run H2O-3 from the command line, start a multi-node cluster, or connect to it from any language via the REST API.
+
+<Steps>
+  <Step title="Download the jar">
+    Download the latest stable release zip from the H2O download page:
+
+    ```bash
+    # Download the zip (replace with the actual current version from h2o.ai/download)
+    curl -O https://h2o-release.s3.amazonaws.com/h2o/latest_stable.html
+    ```
+
+    Visit [https://h2o.ai/download](https://h2o.ai/download) to find the direct download link for the current stable release.
+  </Step>
+
+  <Step title="Unzip and start H2O-3">
+    Unzip the archive and launch the server. By default, H2O-3 starts on port `54321`.
+
+    ```bash
+    unzip h2o-*.zip
+    cd h2o-*/
+    java -jar h2o.jar
+    ```
+
+    Open `http://localhost:54321` in a browser to access the Flow web UI.
+  </Step>
+
+  <Step title="Configure memory and cluster name">
+    Use JVM flags to configure heap size. The rule of thumb is to allocate at least 4× the size of your dataset.
+
+    ```bash
+    # Start with 4 GB heap
+    java -Xmx4g -jar h2o.jar
+
+    # Start with 6 GB heap and a named cluster
+    java -Xmx6g -jar h2o.jar -name MyCluster
+    ```
+
+    <Tip>
+      To form a multi-node cluster, start several JVM processes with the same cluster name on reachable hosts. H2O-3 uses multicast discovery by default. For cloud environments, use a flatfile listing `IP:PORT` pairs and pass it with `-flatfile <file>`.
+    </Tip>
+  </Step>
+</Steps>
+
+## Install on Hadoop
+
+H2O-3 can run as a YARN application on Hadoop clusters. Pre-built Hadoop zip files are available for major distributions including Cloudera CDH 5.4+, MapR 4.0+, and IBM Open Platform 4.2.
+
+<Note>
+  When running H2O-3 on Hadoop, use Java 8 or Java 11. Hadoop itself only supports those versions.
+</Note>
+
+```bash
+# Download the Hadoop zip for your distribution from https://h2o.ai/download
+unzip h2o-*-hdp2.6.zip
+cd h2o-*-hdp2.6/
+
+# Launch a 1-node cluster with 6 GB per mapper
+hadoop jar h2odriver.jar -nodes 1 -mapperXmx 6g
+```
+
+After the cluster forms, the output shows the URL to open H2O Flow in your browser:
+
+```
+H2O cluster (1 nodes) is up
+Open H2O Flow in your web browser: http://172.16.2.188:54321
+```
+
+## Install on Spark (Sparkling Water)
+
+Sparkling Water combines Apache Spark with H2O-3, making H2O-3's algorithms accessible from Spark workflows. Pre-built packages are available on the [download page](https://h2o.ai/download).
+
+Resources:
+
+- [Sparkling Water GitHub repository](https://github.com/h2oai/sparkling-water)
+- [Sparkling Water README](https://github.com/h2oai/sparkling-water/blob/master/README.md)
+
+## Verifying the installation
+
+After installing via any method, verify H2O-3 is working correctly:
+
+<CodeGroup>
+```python Python
+import h2o
+h2o.init()
+
+# Import a sample dataset and confirm parsing works
+df = h2o.import_file(
+    "https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv"
+)
+print(df.shape)   # Should print (150, 5)
+print(df.head())
+```
+```r R
+library(h2o)
+h2o.init()
+
+# Import a sample dataset and confirm parsing works
+df <- h2o.importFile(
+    "https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv"
+)
+print(dim(df))    # Should print [1] 150   5
+print(head(df))
+```
+</CodeGroup>
+
+<Check>
+  If `h2o.init()` completes without error and `df.shape` (Python) or `dim(df)` (R) returns `(150, 5)`, your installation is working correctly.
+</Check>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Train your first model end-to-end in Python or R.
+  </Card>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Learn about H2O-3's architecture, algorithms, and multi-language API.
+  </Card>
+</CardGroup>

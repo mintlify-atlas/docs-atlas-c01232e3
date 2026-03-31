@@ -1,0 +1,206 @@
+---
+title: "Docker & Kubernetes"
+description: "Run H2O in Docker containers and deploy multi-node H2O clusters on Kubernetes using the official Helm chart."
+keywords: ["Docker", "Kubernetes", "Helm", "container", "h2o-open-source-k8s", "StatefulSet", "scaling"]
+---
+
+H2O ships an official Docker image and a Helm chart for Kubernetes. Docker is suitable for single-node local or CI use; Kubernetes is the recommended path for multi-node production deployments.
+
+## Running H2O in Docker
+
+### Official image
+
+The H2O Docker image is based on Ubuntu 24.04 and includes:
+- OpenJDK 8
+- Python 3.11 with `h2o`, `scikit-learn`, `pandas`, `numpy`, and related packages
+- The latest stable `h2o.jar`
+
+Exposed ports:
+- **54321** — H2O Flow web UI and REST API
+- **54322** — internal node-to-node communication
+
+### Quick start
+
+```bash
+docker run -ti -p 54321:54321 h2oai/h2o-open-source-k8s /bin/bash
+```
+
+Inside the container, start H2O:
+
+```bash
+java -jar /opt/h2o.jar
+```
+
+Then open `http://localhost:54321` in your browser to access H2O Flow.
+
+### Building a custom image
+
+Use the [Dockerfile from the H2O repository](https://github.com/h2oai/h2o-3/blob/master/Dockerfile) as a starting point:
+
+```bash
+# Clone and build
+git clone https://github.com/h2oai/h2o-3.git
+cd h2o-3
+docker build -t my-h2o:latest .
+```
+
+The official Dockerfile:
+1. Installs Java 8 and Python 3.11 on Ubuntu 24.04
+2. Downloads the latest stable `h2o.jar` from H2O's S3 repository
+3. Installs the H2O Python wheel
+4. Exposes ports 54321 and 54322
+
+<Note>
+For reproducibility in production, pin to a specific H2O version by setting the image tag rather than using the `latest` tag.
+</Note>
+
+---
+
+## Kubernetes deployment via Helm
+
+The `h2o-helm` chart deploys a multi-node H2O cluster as a Kubernetes `StatefulSet`. Nodes discover each other automatically through the Kubernetes DNS service.
+
+### Prerequisites
+
+- Helm 3.x
+- A Kubernetes cluster with sufficient CPU and memory resources
+- `kubectl` configured to point at your cluster
+
+### Installing the chart
+
+```bash
+helm install h2o-cluster ./h2o-helm \
+    --set h2o.nodeCount=3 \
+    --set image.tag=3.46.0.1 \
+    --set resources.memory=4Gi \
+    --set resources.cpu=2
+```
+
+### Minimal `values.yaml`
+
+```yaml values.yaml
+image:
+  name: h2oai/h2o-open-source-k8s
+  tag: "3.46.0.1"
+
+h2o:
+  nodeCount: 3          # Number of H2O nodes in the cluster
+  memoryPercentage: 50  # Percentage of container memory allocated to H2O JVM heap
+  lookupTimeout: 180    # Seconds to wait for all pods to join the cluster
+
+resources:
+  cpu: 2
+  memory: 4Gi
+```
+
+Apply via Helm:
+
+```bash
+helm install h2o-cluster ./h2o-helm -f values.yaml
+```
+
+### Example with ingress
+
+```yaml example.yaml
+ingress:
+  enabled: true
+  annotations: {}
+  hosts:
+    - host: h2o.example.com
+      paths: ["/"]
+  tls: []
+
+h2o:
+  nodeCount: 3
+
+image:
+  tag: 3.30.1.2
+```
+
+---
+
+## How cluster formation works in Kubernetes
+
+H2O uses a `StatefulSet` with `podManagementPolicy: Parallel` so all pods start simultaneously. Each node discovers its peers via the Kubernetes headless service DNS name:
+
+```
+<release-name>.<namespace>.svc.cluster.local
+```
+
+The relevant environment variables injected into each pod:
+
+| Variable | Description |
+|---|---|
+| `H2O_KUBERNETES_SERVICE_DNS` | Headless service DNS for peer discovery |
+| `H2O_NODE_LOOKUP_TIMEOUT` | Seconds to wait for expected peers (default `180`) |
+| `H2O_NODE_EXPECTED_COUNT` | Total number of nodes to wait for |
+| `H2O_KUBERNETES_API_PORT` | Port for the Kubernetes readiness probe (default `8080`) |
+
+A readiness probe at `/kubernetes/isLeaderNode` on port 8080 gates traffic until the leader node is elected and the cluster is fully formed.
+
+---
+
+## Scaling nodes
+
+<Warning>
+H2O clusters cannot be horizontally scaled after formation — all nodes must be present from the start and remain up for the duration of the cluster's lifetime. Rescaling requires restarting the entire StatefulSet.
+</Warning>
+
+To change the cluster size, update the Helm release:
+
+```bash
+helm upgrade h2o-cluster ./h2o-helm --set h2o.nodeCount=5
+```
+
+This triggers a full StatefulSet rollout. Any in-progress training jobs will be lost.
+
+For reproducible resource allocation, `resources.cpu` and `resources.memory` are set as both `requests` and `limits` — Kubernetes will always give H2O exactly the resources specified.
+
+---
+
+## Accessing the H2O UI and API
+
+By default the chart creates a ClusterIP service on port 80. To expose H2O externally:
+
+**Load balancer** (for cloud environments):
+
+```yaml
+loadbalancer:
+  enabled: true
+```
+
+**Port forwarding** (for local development):
+
+```bash
+kubectl port-forward svc/h2o-cluster 54321:80
+# Then open http://localhost:54321
+```
+
+**Ingress** (for production HTTPS exposure):
+
+```yaml
+ingress:
+  enabled: true
+  hosts:
+    - host: h2o.example.com
+      paths: ["/"]
+  tls:
+    - secretName: h2o-tls
+      hosts:
+        - h2o.example.com
+```
+
+---
+
+## Helm chart reference
+
+The chart source lives at [`h2o-helm/`](https://github.com/h2oai/h2o-3/tree/master/h2o-helm) in the H2O-3 repository.
+
+| File | Purpose |
+|---|---|
+| `Chart.yaml` | Chart metadata and version |
+| `values.yaml` | Default configuration values |
+| `templates/statefulset.yaml` | H2O node `StatefulSet` definition |
+| `templates/service.yaml` | Headless service for peer discovery |
+| `templates/ingress.yaml` | Optional ingress resource |
+| `templates/loadbalancer.yaml` | Optional load balancer service |

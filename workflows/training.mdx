@@ -1,0 +1,351 @@
+---
+title: "Training Models"
+description: "Learn how to train supervised and unsupervised models in H2O-3, split datasets, configure common training parameters, and access model metrics."
+---
+
+H2O-3 supports training supervised models (classification and regression) and unsupervised models (clustering, anomaly detection, dimensionality reduction). All algorithms share a common training interface through the `train()` method in Python and named function calls in R.
+
+## The train() method
+
+The `train()` method (Python) and algorithm-specific functions like `h2o.glm()`, `h2o.gbm()` (R) accept a consistent set of parameters across all supervised algorithms.
+
+### Key parameters
+
+| Parameter | Description |
+|---|---|
+| `x` | A list of column names or indices for predictor columns. |
+| `y` | The name or index of the response column. |
+| `training_frame` | The H2OFrame to train on. |
+| `validation_frame` | An optional H2OFrame for validation scoring during training. |
+| `weights_column` | Name of the column containing per-row observation weights. |
+| `fold_column` | Name of the column containing fold assignment for cross-validation. |
+| `nfolds` | Number of cross-validation folds. Default is 0 (disabled). |
+| `seed` | Seed for random number generation to ensure reproducibility. |
+| `score_each_iteration` | Whether to score on a validation set at each iteration. |
+| `max_runtime_secs` | Maximum allowed runtime in seconds. Use 0 to disable. |
+
+## Splitting datasets
+
+Use `split_frame()` (Python) or `h2o.splitFrame()` (R) to divide an H2OFrame into train and test sets before training.
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init()
+
+df = h2o.import_file("https://h2o-public-test-data.s3.amazonaws.com/smalldata/prostate/prostate.csv")
+
+# Split into 80% train, 20% test
+train, test = df.split_frame(ratios=[0.8], seed=1234)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+df <- h2o.importFile("https://h2o-public-test-data.s3.amazonaws.com/smalldata/prostate/prostate.csv")
+
+# Split into 80% train, 20% test
+df_splits <- h2o.splitFrame(data = df, ratios = 0.8, seed = 1234)
+train <- df_splits[[1]]
+test <- df_splits[[2]]
+```
+
+</CodeGroup>
+
+<Tip>For a three-way split (train/validation/test), pass two ratios: `ratios=[0.6, 0.2]` in Python or `ratios=c(0.6, 0.2)` in R.</Tip>
+
+## Classification example
+
+H2O determines whether to perform classification or regression based on the type of the response column. For classification, the column must be a **factor** (categorical) type. For regression, it must be **numeric**.
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+h2o.init()
+
+# Import the prostate dataset
+prostate = h2o.import_file("https://h2o-public-test-data.s3.amazonaws.com/smalldata/prostate/prostate.csv")
+
+# Convert response to factor for classification
+prostate['CAPSULE'] = prostate['CAPSULE'].asfactor()
+prostate['RACE'] = prostate['RACE'].asfactor()
+
+# Define predictors and response
+predictors = ["AGE", "RACE", "VOL", "GLEASON"]
+response = "CAPSULE"
+
+# Split into train and test sets
+train, test = prostate.split_frame(ratios=[0.8], seed=1234)
+
+# Train a GLM model
+glm_model = H2OGeneralizedLinearEstimator(family="binomial", lambda_=0, compute_p_values=True)
+glm_model.train(predictors, response, training_frame=train)
+
+# Predict on the test set
+predict = glm_model.predict(test)
+predict.head()
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Import the prostate dataset
+df <- h2o.importFile("https://h2o-public-test-data.s3.amazonaws.com/smalldata/prostate/prostate.csv")
+
+# Convert response to factor for classification
+df$CAPSULE <- as.factor(df$CAPSULE)
+df$RACE <- as.factor(df$RACE)
+
+# Define predictors and response
+predictors <- c("AGE", "RACE", "VOL", "GLEASON")
+response <- "CAPSULE"
+
+# Split into train and test sets
+df_splits <- h2o.splitFrame(data = df, ratios = 0.8, seed = 1234)
+train <- df_splits[[1]]
+test <- df_splits[[2]]
+
+# Train a GLM model
+prostate_glm <- h2o.glm(family = "binomial",
+                        x = predictors,
+                        y = response,
+                        training_frame = train,
+                        lambda = 0,
+                        compute_p_values = TRUE)
+
+# Predict on the test set
+predict <- h2o.predict(object = prostate_glm, newdata = test)
+h2o.head(predict)
+```
+
+</CodeGroup>
+
+## Regression example
+
+For regression, the response column must be numeric. The following example uses the Boston Housing dataset to predict median home prices.
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+h2o.init()
+
+# Import the Boston Housing dataset
+boston = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/BostonHousing.csv")
+
+# Set predictors and response
+predictors = boston.columns[:-1]
+response = "medv"
+
+# Convert chas to a factor (it's a binary indicator)
+boston['chas'] = boston['chas'].asfactor()
+
+# Split into train and test sets
+train, test = boston.split_frame(ratios=[0.8], seed=1234)
+
+# Train the model
+boston_glm = H2OGeneralizedLinearEstimator(alpha=0.25)
+boston_glm.train(x=predictors, y=response, training_frame=train)
+
+# Predict on the test set
+predict = boston_glm.predict(test)
+predict.head()
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Import the Boston Housing dataset
+boston <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/BostonHousing.csv")
+
+# Set predictors and response
+predictors <- colnames(boston)[1:13]
+response <- "medv"
+
+# Convert chas to a factor (it's a binary indicator)
+boston["chas"] <- as.factor(boston["chas"])
+
+# Split into train and test sets
+boston_splits <- h2o.splitFrame(data = boston, ratios = 0.8, seed = 1234)
+train <- boston_splits[[1]]
+test <- boston_splits[[2]]
+
+# Train the model
+boston_glm <- h2o.glm(x = predictors,
+                      y = response,
+                      training_frame = train,
+                      alpha = 0.25)
+
+# Predict on the test set
+predict <- h2o.predict(object = boston_glm, newdata = test)
+h2o.head(predict)
+```
+
+</CodeGroup>
+
+## Common training parameters
+
+These parameters are shared across most H2O-3 algorithms.
+
+### Controlling runtime
+
+Use `max_runtime_secs` to cap training time. This is especially useful in automated pipelines or when exploring many models.
+
+<CodeGroup>
+
+```python Python
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+gbm = H2OGradientBoostingEstimator(
+    max_runtime_secs=60,   # stop after 60 seconds
+    seed=42
+)
+gbm.train(x=predictors, y=response, training_frame=train)
+```
+
+```r R
+gbm_model <- h2o.gbm(
+    x = predictors,
+    y = response,
+    training_frame = train,
+    max_runtime_secs = 60,  # stop after 60 seconds
+    seed = 42
+)
+```
+
+</CodeGroup>
+
+### Enabling cross-validation during training
+
+Pass `nfolds` to perform K-fold cross-validation automatically as part of training. See [Cross-Validation](/workflows/cross-validation) for details.
+
+<CodeGroup>
+
+```python Python
+gbm = H2OGradientBoostingEstimator(nfolds=5, seed=42)
+gbm.train(x=predictors, y=response, training_frame=train)
+```
+
+```r R
+gbm_model <- h2o.gbm(x = predictors,
+                     y = response,
+                     training_frame = train,
+                     nfolds = 5,
+                     seed = 42)
+```
+
+</CodeGroup>
+
+## Accessing model metrics after training
+
+After training, you can retrieve performance metrics on training, validation, and cross-validation data.
+
+<CodeGroup>
+
+```python Python
+# Training metrics
+perf_train = gbm.model_performance(train=True)
+print(perf_train)
+
+# Validation metrics
+perf_valid = gbm.model_performance(valid=True)
+print(perf_valid)
+
+# Cross-validation metrics (if nfolds > 0)
+perf_xval = gbm.model_performance(xval=True)
+print(perf_xval)
+
+# Access a specific metric (e.g., AUC for binary classification)
+print(gbm.auc(train=True))
+print(gbm.auc(xval=True))
+```
+
+```r R
+# Training metrics
+perf_train <- h2o.performance(model = gbm_model, train = TRUE)
+print(perf_train)
+
+# Validation metrics
+perf_valid <- h2o.performance(model = gbm_model, valid = TRUE)
+print(perf_valid)
+
+# Cross-validation metrics (if nfolds > 0)
+perf_xval <- h2o.performance(model = gbm_model, xval = TRUE)
+print(perf_xval)
+
+# Access a specific metric (e.g., AUC for binary classification)
+h2o.auc(gbm_model, train = TRUE)
+h2o.auc(gbm_model, xval = TRUE)
+```
+
+</CodeGroup>
+
+## Training on segments
+
+H2O-3 can train a separate model for each subpopulation (segment) of a dataset using `train_segments()`. This is useful for building per-group models, such as per-region or per-category models.
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+h2o.init()
+
+titanic = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/titanic.csv")
+titanic["survived"] = titanic["survived"].asfactor()
+
+predictors = ["name", "sex", "age", "sibsp", "parch", "ticket", "fare", "cabin"]
+response = "survived"
+
+train, valid = titanic.split_frame(ratios=[.8], seed=1234)
+
+# Train one GBM per passenger class
+titanic_gbm = H2OGradientBoostingEstimator(seed=1234)
+titanic_models = titanic_gbm.train_segments(
+    segments=["pclass"],
+    x=predictors,
+    y=response,
+    training_frame=train,
+    validation_frame=valid
+)
+
+# View results as a frame
+titanic_models.as_frame()
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+titanic <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/gbm_test/titanic.csv")
+titanic['survived'] <- as.factor(titanic['survived'])
+
+predictors <- c("name", "sex", "age", "sibsp", "parch", "ticket", "fare", "cabin")
+response <- "survived"
+
+titanic.splits <- h2o.splitFrame(data = titanic, ratios = .8, seed = 1234)
+train <- titanic.splits[[1]]
+valid <- titanic.splits[[2]]
+
+# Train one GBM per passenger class
+titanic_models <- h2o.train_segments(algorithm = "gbm",
+                                     segment_columns = "pclass",
+                                     x = predictors,
+                                     y = response,
+                                     training_frame = train,
+                                     validation_frame = valid,
+                                     seed = 1234)
+
+as.data.frame(titanic_models)
+```
+
+</CodeGroup>
+
+<Note>The `train_segments()` function trains one model per segment group. The `parallelism` parameter controls how many models build simultaneously on each H2O node.</Note>

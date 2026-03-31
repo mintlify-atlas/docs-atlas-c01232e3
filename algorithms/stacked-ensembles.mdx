@@ -1,0 +1,215 @@
+---
+title: "Stacked Ensembles"
+description: "H2O-3's Stacked Ensemble (Super Learner) trains a metalearner on cross-validated base model predictions to find the optimal combination of diverse algorithms."
+---
+
+Stacked Ensembles use a process called **stacking** (also known as Super Learning or Stacked Regression) to combine multiple base learners. Unlike bagging (DRF) and boosting (GBM), stacking ensembles **strong, diverse** learners together. The goal is to find the optimal weighted combination of base learners by training a second-level metalearner on their cross-validated predictions.
+
+H2O-3 supports regression, binary classification, and multiclass classification with Stacked Ensembles.
+
+**MOJO Support:** Stacked Ensembles support importing and exporting MOJOs.
+
+---
+
+## How Stacking Works
+
+<Steps>
+  <Step title="Set up base learners">
+    Train a diverse set of cross-validated base models (e.g., GBM, XGBoost, DRF, GLM, Deep Learning). All base models must use the same number of cross-validation folds and have `keep_cross_validation_predictions=True`.
+  </Step>
+  <Step title="Build the level-one data">
+    The cross-validated out-of-fold predictions from each base model are assembled into an `N × L` matrix (N rows, L base models). This "level-one" data represents what each base model predicts for each training row when it wasn't used to train that fold.
+  </Step>
+  <Step title="Train the metalearner">
+    A metalearner algorithm (by default, a non-negative GLM) is trained on the level-one data against the true response. The metalearner learns the optimal weights for each base model.
+  </Step>
+  <Step title="Predict">
+    For new data: generate base model predictions, then feed them into the metalearner to produce the final ensemble prediction.
+  </Step>
+</Steps>
+
+---
+
+## Building Base Learners
+
+Before training a Stacked Ensemble, you need cross-validated base models. The requirements are:
+
+- All base models must use the same number of folds (`nfolds >= 2`) or the same `fold_column`.
+- All base models must have `keep_cross_validation_predictions=True`.
+- All base models must be trained on the **same `training_frame`**.
+
+<Tip>
+  Use `fold_assignment="Modulo"` with the same `nfolds` across all base models to guarantee identical fold assignments. Alternatively, use `fold_assignment="Random"` with the same `seed`.
+</Tip>
+
+```python Python
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+from h2o.estimators.random_forest import H2ORandomForestEstimator
+from h2o.estimators.glm import H2OGeneralizedLinearEstimator
+from h2o.estimators.xgboost import H2OXGBoostEstimator
+from h2o.estimators.stackedensemble import H2OStackedEnsembleEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [c for c in train.columns if c != y]
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+# Shared cross-validation settings
+nfolds = 5
+
+# Base model 1: GBM
+gbm = H2OGradientBoostingEstimator(
+    ntrees=100, max_depth=5, learn_rate=0.05,
+    nfolds=nfolds,
+    fold_assignment="Modulo",
+    keep_cross_validation_predictions=True,
+    seed=42
+)
+gbm.train(x=x, y=y, training_frame=train)
+
+# Base model 2: DRF
+drf = H2ORandomForestEstimator(
+    ntrees=100,
+    nfolds=nfolds,
+    fold_assignment="Modulo",
+    keep_cross_validation_predictions=True,
+    seed=42
+)
+drf.train(x=x, y=y, training_frame=train)
+
+# Base model 3: GLM
+glm = H2OGeneralizedLinearEstimator(
+    family="binomial", alpha=0.5, lambda_search=True,
+    nfolds=nfolds,
+    fold_assignment="Modulo",
+    keep_cross_validation_predictions=True,
+    seed=42
+)
+glm.train(x=x, y=y, training_frame=train)
+```
+
+---
+
+## Training the Stacked Ensemble
+
+```python Python
+# Train Stacked Ensemble on all base models
+ensemble = H2OStackedEnsembleEstimator(
+    base_models=[gbm, drf, glm],
+    metalearner_algorithm="glm",  # default: non-negative GLM
+    seed=42
+)
+ensemble.train(x=x, y=y, training_frame=train)
+
+# Evaluate
+perf = ensemble.model_performance(test)
+print("Ensemble AUC:", perf.auc())
+print("GBM AUC:     ", gbm.model_performance(test).auc())
+print("DRF AUC:     ", drf.model_performance(test).auc())
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+nfolds <- 5
+
+gbm <- h2o.gbm(
+  x = x, y = y, training_frame = train,
+  ntrees = 100, max_depth = 5, learn_rate = 0.05,
+  nfolds = nfolds, fold_assignment = "Modulo",
+  keep_cross_validation_predictions = TRUE, seed = 42
+)
+
+drf <- h2o.randomForest(
+  x = x, y = y, training_frame = train,
+  ntrees = 100,
+  nfolds = nfolds, fold_assignment = "Modulo",
+  keep_cross_validation_predictions = TRUE, seed = 42
+)
+
+glm <- h2o.glm(
+  x = x, y = y, training_frame = train,
+  family = "binomial", alpha = 0.5, lambda_search = TRUE,
+  nfolds = nfolds, fold_assignment = "Modulo",
+  keep_cross_validation_predictions = TRUE, seed = 42
+)
+
+# Stack them
+ensemble <- h2o.stackedEnsemble(
+  x = x, y = y, training_frame = train,
+  base_models = list(gbm@model_id, drf@model_id, glm@model_id),
+  metalearner_algorithm = "glm",
+  seed = 42
+)
+
+h2o.auc(h2o.performance(ensemble, test))
+```
+
+---
+
+## Metalearner Options
+
+<ParamField path="metalearner_algorithm" type="str" default="AUTO">
+  Algorithm used to combine base model predictions:
+  - `"AUTO"` (default) — non-negative GLM with standardization off; uses `lambda_search` if a validation frame is present
+  - `"glm"` — GLM with default parameters
+  - `"gbm"` — GBM with default parameters
+  - `"drf"` — Distributed Random Forest
+  - `"deeplearning"` — Deep Learning
+  - `"naivebayes"` — Naïve Bayes
+  - `"xgboost"` — XGBoost (if available)
+</ParamField>
+
+<ParamField path="metalearner_nfolds" type="int" default="0">
+  Number of cross-validation folds for the metalearner itself. `0` disables metalearner CV.
+</ParamField>
+
+<ParamField path="blending_frame" type="H2OFrame">
+  If provided, triggers **blending mode**: the base model predictions on this holdout frame are used as metalearner training data instead of cross-validation predictions. Faster than stacking but requires a separate blending frame.
+</ParamField>
+
+<ParamField path="keep_levelone_frame" type="bool" default="False">
+  Retain the level-one data frame (base model CV predictions assembled into a matrix) for inspection.
+</ParamField>
+
+<ParamField path="base_models" type="List" required>
+  List of trained H2O model objects or model IDs. All models must be cross-validated with the same folds and have `keep_cross_validation_predictions=True`.
+</ParamField>
+
+---
+
+## Blending Mode
+
+Blending (holdout stacking) is an alternative to cross-validation-based stacking. You provide a separate `blending_frame` that the base models score on; those predictions become the metalearner training data.
+
+```python Python
+# Split off a blending frame
+train_main, blend = train.split_frame(ratios=[0.7], seed=42)
+
+# Train base models on train_main (no cross-validation needed)
+gbm.train(x=x, y=y, training_frame=train_main)
+drf.train(x=x, y=y, training_frame=train_main)
+
+# Train ensemble in blending mode
+ensemble_blend = H2OStackedEnsembleEstimator(
+    base_models=[gbm, drf],
+    metalearner_algorithm="glm",
+    blending_frame=blend,
+)
+ensemble_blend.train(x=x, y=y, training_frame=train_main)
+```

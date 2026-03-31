@@ -1,0 +1,558 @@
+---
+title: "REST API Endpoints"
+description: "Complete reference for H2O-3 REST API endpoints covering Frames, Models, Jobs, ModelBuilders, AutoML, and Predictions."
+keywords: ["H2O REST endpoints", "H2O API reference", "H2O curl examples"]
+---
+
+All endpoints use the base URL `http://localhost:54321` and the `/3/` version prefix. Responses are JSON. Long-running operations return a job reference; poll `GET /3/Jobs/{job_id}` for completion.
+
+---
+
+## Frames
+
+### GET /3/Frames
+
+List all frames stored in the H2O cluster.
+
+```bash
+curl -s http://localhost:54321/3/Frames
+```
+
+<AccordionGroup>
+  <Accordion title="Query parameters">
+    <ParamField path="query.find_compatible_models" type="boolean" default="false">
+      Include compatible model IDs for each frame.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Response fields">
+    <ResponseField name="frames" type="object[]">
+      Array of frame summaries.
+      <Expandable title="properties">
+        <ResponseField name="frame_id" type="object">
+          Frame key. Use the `name` field as `{frame_id}` in subsequent requests.
+        </ResponseField>
+        <ResponseField name="rows" type="number">
+          Number of rows.
+        </ResponseField>
+        <ResponseField name="total_column_count" type="number">
+          Total number of columns.
+        </ResponseField>
+        <ResponseField name="columns" type="object[]">
+          Column metadata including name, type, min, max, mean, and missing count.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### GET /3/Frames/{frame_id}
+
+Retrieve details for a specific frame, including column statistics.
+
+```bash
+curl -s http://localhost:54321/3/Frames/train_frame
+```
+
+<AccordionGroup>
+  <Accordion title="Path parameters">
+    <ParamField path="path.frame_id" type="string" required>
+      The key name of the frame (e.g., `train_frame`).
+    </ParamField>
+  </Accordion>
+  <Accordion title="Query parameters">
+    <ParamField path="query.row_offset" type="number" default="0">
+      Starting row for inline data preview.
+    </ParamField>
+    <ParamField path="query.row_count" type="number" default="10">
+      Number of rows to return in the inline preview.
+    </ParamField>
+    <ParamField path="query.column_offset" type="number" default="0">
+      Starting column index.
+    </ParamField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### DELETE /3/Frames/{frame_id}
+
+Delete a frame from the cluster and free its memory.
+
+```bash
+curl -s -X DELETE http://localhost:54321/3/Frames/train_frame
+```
+
+<Warning>
+  Frame deletion is irreversible. The data is removed from the distributed key-value store and cannot be recovered.
+</Warning>
+
+<ParamField path="path.frame_id" type="string" required>
+  Key name of the frame to delete.
+</ParamField>
+
+---
+
+## Models
+
+### GET /3/Models
+
+List all trained models in the cluster.
+
+```bash
+curl -s http://localhost:54321/3/Models
+```
+
+<AccordionGroup>
+  <Accordion title="Response fields">
+    <ResponseField name="models" type="object[]">
+      Array of model summaries.
+      <Expandable title="properties">
+        <ResponseField name="model_id" type="object">
+          Model key. Use the `name` field as `{model_id}` in subsequent requests.
+        </ResponseField>
+        <ResponseField name="algo" type="string">
+          Algorithm name (e.g., `gbm`, `drf`, `deeplearning`, `glm`).
+        </ResponseField>
+        <ResponseField name="output" type="object">
+          Training metrics and model output statistics.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### GET /3/Models/{model_id}
+
+Retrieve full details for a specific model, including training metrics and parameters.
+
+```bash
+curl -s http://localhost:54321/3/Models/GBM_model_1234567890
+```
+
+<ParamField path="path.model_id" type="string" required>
+  The key name of the model (e.g., `GBM_model_1234567890`).
+</ParamField>
+
+<AccordionGroup>
+  <Accordion title="Response fields">
+    <ResponseField name="models" type="object[]">
+      Single-element array containing the model.
+      <Expandable title="properties">
+        <ResponseField name="algo" type="string">
+          Algorithm used to train the model.
+        </ResponseField>
+        <ResponseField name="parameters" type="object">
+          All training parameters, including defaults.
+        </ResponseField>
+        <ResponseField name="output" type="object">
+          Training metrics (AUC, logloss, RMSE, etc.), variable importances, and scoring history.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### DELETE /3/Models/{model_id}
+
+Delete a model from the cluster.
+
+```bash
+curl -s -X DELETE http://localhost:54321/3/Models/GBM_model_1234567890
+```
+
+<ParamField path="path.model_id" type="string" required>
+  Key name of the model to delete.
+</ParamField>
+
+---
+
+## ModelBuilders
+
+### POST /3/ModelBuilders/{algo}
+
+Train a model asynchronously. Returns a job reference immediately. The response includes a `job.key.name` to poll at `GET /3/Jobs/{job_id}`.
+
+Available `{algo}` values: `gbm`, `drf`, `deeplearning`, `glm`, `gam`, `xgboost`, `kmeans`, `pca`, `svd`, `glrm`, `isolationforest`, `naivebayes`, `stackedensemble`.
+
+<CodeGroup>
+
+```bash GBM
+curl -s -X POST http://localhost:54321/3/ModelBuilders/gbm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "training_frame": "train_frame",
+    "response_column": {"column_name": "CAPSULE"},
+    "ntrees": 100,
+    "max_depth": 5,
+    "learn_rate": 0.05,
+    "seed": 42
+  }'
+```
+
+```bash Random Forest
+curl -s -X POST http://localhost:54321/3/ModelBuilders/drf \
+  -H "Content-Type: application/json" \
+  -d '{
+    "training_frame": "train_frame",
+    "response_column": {"column_name": "CAPSULE"},
+    "ntrees": 100,
+    "max_depth": 20,
+    "seed": 42
+  }'
+```
+
+```bash GLM
+curl -s -X POST http://localhost:54321/3/ModelBuilders/glm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "training_frame": "train_frame",
+    "response_column": {"column_name": "CAPSULE"},
+    "family": "binomial",
+    "alpha": [0.5],
+    "lambda_search": true
+  }'
+```
+
+```bash Deep Learning
+curl -s -X POST http://localhost:54321/3/ModelBuilders/deeplearning \
+  -H "Content-Type: application/json" \
+  -d '{
+    "training_frame": "train_frame",
+    "response_column": {"column_name": "CAPSULE"},
+    "hidden": [200, 200],
+    "epochs": 50,
+    "activation": "RectifierWithDropout",
+    "seed": 42
+  }'
+```
+
+</CodeGroup>
+
+<AccordionGroup>
+  <Accordion title="Path parameters">
+    <ParamField path="path.algo" type="string" required>
+      Algorithm name. See the list of available values above.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Common body parameters">
+    <ParamField path="body.training_frame" type="string" required>
+      Key name of the training frame.
+    </ParamField>
+    <ParamField path="body.response_column" type="object" required>
+      Object with a `column_name` field specifying the response column (e.g., `{"column_name": "label"}`).
+    </ParamField>
+    <ParamField path="body.validation_frame" type="string">
+      Key name of the validation frame.
+    </ParamField>
+    <ParamField path="body.model_id" type="string">
+      Custom key for the trained model. Auto-generated if omitted.
+    </ParamField>
+    <ParamField path="body.nfolds" type="number" default="0">
+      Cross-validation folds.
+    </ParamField>
+    <ParamField path="body.seed" type="number" default="-1">
+      Random seed.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Response fields">
+    <ResponseField name="job" type="object">
+      Asynchronous job reference.
+      <Expandable title="properties">
+        <ResponseField name="key" type="object">
+          <Expandable title="properties">
+            <ResponseField name="name" type="string">
+              Job ID. Poll `GET /3/Jobs/{name}` for status.
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+        <ResponseField name="status" type="string">
+          Initial status, typically `CREATED`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Jobs
+
+### GET /3/Jobs/{job_id}
+
+Poll the status of an asynchronous job.
+
+```bash
+curl -s http://localhost:54321/3/Jobs/$JOB_KEY
+```
+
+<ParamField path="path.job_id" type="string" required>
+  The job key name returned by a training or parsing request.
+</ParamField>
+
+<AccordionGroup>
+  <Accordion title="Response fields">
+    <ResponseField name="jobs" type="object[]">
+      Single-element array with job details.
+      <Expandable title="properties">
+        <ResponseField name="key" type="object">
+          Job key containing the `name` field.
+        </ResponseField>
+        <ResponseField name="status" type="string">
+          Job state: `CREATED`, `RUNNING`, `DONE`, `CANCELLED`, `FAILED`.
+        </ResponseField>
+        <ResponseField name="progress" type="number">
+          Completion fraction from `0.0` to `1.0`.
+        </ResponseField>
+        <ResponseField name="progress_msg" type="string">
+          Human-readable progress description.
+        </ResponseField>
+        <ResponseField name="start_time" type="number">
+          Job start time in milliseconds since epoch.
+        </ResponseField>
+        <ResponseField name="msec" type="number">
+          Elapsed milliseconds.
+        </ResponseField>
+        <ResponseField name="dest" type="object">
+          Destination key of the result (model key, frame key, etc.).
+        </ResponseField>
+        <ResponseField name="exception" type="string">
+          Error message if `status` is `FAILED`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+**Polling loop example:**
+
+```bash
+JOB_KEY="your_job_key_here"
+
+while true; do
+  RESPONSE=$(curl -s "http://localhost:54321/3/Jobs/$JOB_KEY")
+  STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobs'][0]['status'])")
+  PROGRESS=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobs'][0]['progress'])")
+  echo "Status: $STATUS  Progress: $PROGRESS"
+  [ "$STATUS" = "DONE" ] && break
+  [ "$STATUS" = "FAILED" ] && echo "Error:" && echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobs'][0]['exception'])" && break
+  sleep 2
+done
+```
+
+---
+
+## AutoML
+
+### POST /3/AutoML
+
+Start an AutoML run. Trains multiple models and produces a leaderboard ranked by a performance metric.
+
+```bash
+curl -s -X POST http://localhost:54321/3/AutoML \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input_spec": {
+      "training_frame": "train_frame",
+      "response_column": {"column_name": "CAPSULE"}
+    },
+    "build_control": {
+      "stopping_criteria": {
+        "max_models": 20,
+        "max_runtime_secs": 600
+      },
+      "seed": 42
+    }
+  }'
+```
+
+<AccordionGroup>
+  <Accordion title="Key body fields">
+    <ParamField path="body.input_spec.training_frame" type="string" required>
+      Key name of the training frame.
+    </ParamField>
+    <ParamField path="body.input_spec.response_column" type="object" required>
+      Object with `column_name` field specifying the target column.
+    </ParamField>
+    <ParamField path="body.input_spec.leaderboard_frame" type="string">
+      Optional holdout frame for leaderboard scoring.
+    </ParamField>
+    <ParamField path="body.build_control.stopping_criteria.max_models" type="number">
+      Maximum number of individual models to train.
+    </ParamField>
+    <ParamField path="body.build_control.stopping_criteria.max_runtime_secs" type="number" default="3600">
+      Maximum AutoML runtime in seconds.
+    </ParamField>
+    <ParamField path="body.build_control.seed" type="number" default="-1">
+      Random seed. Pair with `max_models` for reproducible runs.
+    </ParamField>
+    <ParamField path="body.build_spec.exclude_algos" type="string[]">
+      Algorithms to exclude. Options: `GLM`, `GBM`, `DRF`, `XGBoost`, `DeepLearning`, `StackedEnsemble`.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Response fields">
+    <ResponseField name="job" type="object">
+      Job reference for polling. When done, `dest.name` contains the AutoML project ID.
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+### GET /3/AutoML/{automl_id}
+
+Retrieve the results and leaderboard for a completed AutoML run.
+
+```bash
+curl -s http://localhost:54321/3/AutoML/AutoML_20240101_120000
+```
+
+<ParamField path="path.automl_id" type="string" required>
+  AutoML project ID, returned in the `dest.name` field of the job response.
+</ParamField>
+
+<AccordionGroup>
+  <Accordion title="Response fields">
+    <ResponseField name="leader" type="object">
+      The best model found. Contains `name` (model key) and `type`.
+    </ResponseField>
+    <ResponseField name="leaderboard" type="object">
+      Leaderboard frame with all models ranked by the sort metric.
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Frame key for the leaderboard data. Retrieve with `GET /3/Frames/{name}`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+    <ResponseField name="project_name" type="string">
+      AutoML project identifier.
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Predictions
+
+### POST /3/Predictions/models/{model_id}/frames/{frame_id}
+
+Score a frame using a trained model. Creates a predictions frame and returns it inline.
+
+```bash
+curl -s -X POST \
+  "http://localhost:54321/3/Predictions/models/GBM_model_1234567890/frames/test_frame"
+```
+
+<AccordionGroup>
+  <Accordion title="Path parameters">
+    <ParamField path="path.model_id" type="string" required>
+      Key name of the trained model.
+    </ParamField>
+    <ParamField path="path.frame_id" type="string" required>
+      Key name of the frame to score.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Query parameters">
+    <ParamField path="query.predictions_frame" type="string">
+      Optional custom key for the output predictions frame.
+    </ParamField>
+    <ParamField path="query.reconstruction_error" type="boolean" default="false">
+      For autoencoder models: return reconstruction error instead of predictions.
+    </ParamField>
+    <ParamField path="query.deep_features_hidden_layer" type="number">
+      For deep learning models: return activations from a specific hidden layer index.
+    </ParamField>
+  </Accordion>
+  <Accordion title="Response fields">
+    <ResponseField name="model_metrics" type="object[]">
+      Performance metrics computed on the scored frame (if the frame has a response column matching the model's response).
+    </ResponseField>
+    <ResponseField name="predictions_frame" type="object">
+      Reference to the output predictions frame.
+      <Expandable title="properties">
+        <ResponseField name="name" type="string">
+          Frame key. Retrieve predictions with `GET /3/Frames/{name}`.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+**Retrieve prediction values:**
+
+```bash
+# Score
+curl -s -X POST \
+  "http://localhost:54321/3/Predictions/models/GBM_model_1234567890/frames/test_frame" \
+  | python3 -c "import sys,json; r=json.load(sys.stdin); print(r['predictions_frame']['name'])"
+
+# Then fetch the predictions frame
+PRED_KEY="GBMPredictions_GBM_model_1234567890_test_frame"
+curl -s "http://localhost:54321/3/Frames/$PRED_KEY?row_count=5" \
+  | python3 -m json.tool
+```
+
+---
+
+## Metadata
+
+### GET /3/Metadata/endpoints
+
+List all registered REST endpoints with their HTTP methods, paths, handler classes, and parameter schemas. This is the canonical API discovery endpoint.
+
+```bash
+curl -s http://localhost:54321/3/Metadata/endpoints | python3 -m json.tool
+```
+
+<AccordionGroup>
+  <Accordion title="Response fields">
+    <ResponseField name="routes" type="object[]">
+      All registered routes.
+      <Expandable title="properties">
+        <ResponseField name="http_method" type="string">
+          HTTP method: `GET`, `POST`, `DELETE`, `PUT`.
+        </ResponseField>
+        <ResponseField name="url_pattern" type="string">
+          URL pattern with `{param}` placeholders.
+        </ResponseField>
+        <ResponseField name="summary" type="string">
+          Short description of the endpoint.
+        </ResponseField>
+        <ResponseField name="input_schema" type="string">
+          Name of the input schema class.
+        </ResponseField>
+        <ResponseField name="output_schema" type="string">
+          Name of the output schema class.
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Quick reference
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/3/Frames` | List all frames |
+| `GET` | `/3/Frames/{frame_id}` | Get frame details and preview |
+| `DELETE` | `/3/Frames/{frame_id}` | Delete a frame |
+| `GET` | `/3/Models` | List all models |
+| `GET` | `/3/Models/{model_id}` | Get model details and metrics |
+| `DELETE` | `/3/Models/{model_id}` | Delete a model |
+| `POST` | `/3/ModelBuilders/{algo}` | Train a model |
+| `GET` | `/3/Jobs/{job_id}` | Poll job status |
+| `POST` | `/3/AutoML` | Start AutoML |
+| `GET` | `/3/AutoML/{automl_id}` | Get AutoML results |
+| `POST` | `/3/Predictions/models/{model_id}/frames/{frame_id}` | Score a frame |
+| `GET` | `/3/Metadata/endpoints` | List all endpoints |
+| `GET` | `/3/Cloud` | Cluster health and node info |
+| `POST` | `/3/ImportFiles` | Import a file from the server filesystem |
+| `POST` | `/3/Parse` | Parse an imported raw file into a frame |
+| `GET` | `/3/Grid/{grid_id}` | Get grid search results |

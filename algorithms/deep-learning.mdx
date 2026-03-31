@@ -1,0 +1,209 @@
+---
+title: "Deep Learning"
+description: "H2O-3's Deep Learning algorithm implements a multi-layer feedforward neural network trained with stochastic gradient descent and backpropagation."
+---
+
+H2O's Deep Learning is based on a **multi-layer feedforward artificial neural network** (also called a deep neural network, DNN, or multi-layer perceptron, MLP) trained with stochastic gradient descent using backpropagation. The network supports large numbers of hidden layers with `tanh`, `rectifier`, and `maxout` activation functions.
+
+Each compute node trains a copy of the global model parameters on its local data with multi-threading (asynchronously) and contributes periodically to the global model via model averaging across the network.
+
+<Note>
+  H2O-3's Deep Learning is optimized for **tabular (transactional) data**. For image data, consider CNNs; for sequential data (text, time-series), consider RNNs. H2O Deep Learning works well when GBM and DRF are under-performing due to highly non-linear feature interactions or very large datasets.
+</Note>
+
+**MOJO Support:** Deep Learning supports importing and exporting MOJOs.
+
+---
+
+## Key Parameters
+
+<ParamField path="hidden" type="List[int]" default="[200, 200]">
+  The architecture of hidden layers. Each value specifies the number of neurons in that layer. For example, `[200, 200]` creates a 2-layer network with 200 neurons each. Deeper networks (more layers) can capture more complex patterns.
+</ParamField>
+
+<ParamField path="epochs" type="float" default="10.0">
+  Number of passes through the training data. Can be fractional. More epochs improve accuracy but risk overfitting. Use `overwrite_with_best_model=True` (default) to keep the best checkpoint.
+</ParamField>
+
+<ParamField path="activation" type="str" default="rectifier">
+  Activation function for hidden layers:
+  - `"tanh"` — hyperbolic tangent
+  - `"tanh_with_dropout"` — tanh with dropout regularization
+  - `"rectifier"` (default) — ReLU; fast and effective for most tasks
+  - `"rectifier_with_dropout"` — ReLU with dropout
+  - `"maxout"` — max over linear functions; powerful but slow
+  - `"maxout_with_dropout"` — maxout with dropout
+</ParamField>
+
+<ParamField path="adaptive_rate" type="bool" default="True">
+  Enable ADADELTA adaptive learning rate. When `True` (default), the `rate`, `rate_annealing`, and `rate_decay` parameters are ignored. Recommended for most use cases.
+</ParamField>
+
+<ParamField path="rate" type="float" default="0.005">
+  Manual learning rate (only used when `adaptive_rate=False`). Higher values converge faster but can be unstable.
+</ParamField>
+
+<ParamField path="rho" type="float" default="0.99">
+  ADADELTA time decay factor (only used when `adaptive_rate=True`). Controls how much past gradient information is retained.
+</ParamField>
+
+<ParamField path="epsilon" type="float" default="1e-08">
+  ADADELTA smoothing factor (only used when `adaptive_rate=True`). Prevents division by zero.
+</ParamField>
+
+<ParamField path="input_dropout_ratio" type="float" default="0.0">
+  Fraction of input features to randomly drop during training. Suggested values: `0.1` or `0.2`. Helps prevent overfitting on noisy datasets.
+</ParamField>
+
+<ParamField path="hidden_dropout_ratios" type="List[float]" default="0.5 per layer">
+  Per-layer hidden dropout ratios. Only applicable when using a `*_with_dropout` activation. Must have one value per hidden layer. Range: `[0, 1)`.
+</ParamField>
+
+<ParamField path="l1" type="float" default="0.0">
+  L1 regularization. Sets many weights to exactly zero, producing sparse networks. Increase to reduce overfitting.
+</ParamField>
+
+<ParamField path="l2" type="float" default="0.0">
+  L2 regularization. Shrinks weights toward zero without setting them exactly to zero. Increase to reduce overfitting.
+</ParamField>
+
+<ParamField path="loss" type="str" default="automatic">
+  Loss function: `"automatic"` infers from the response type. Options: `"cross_entropy"` (classification), `"quadratic"`, `"huber"`, `"absolute"`, `"quantile"`.
+</ParamField>
+
+---
+
+## Code Examples
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.deeplearning import H2ODeepLearningEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [c for c in train.columns if c != y]
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+dl = H2ODeepLearningEstimator(
+    hidden=[200, 200],
+    epochs=20,
+    activation="rectifier_with_dropout",
+    hidden_dropout_ratios=[0.2, 0.2],
+    input_dropout_ratio=0.1,
+    l1=1e-5,
+    l2=1e-5,
+    adaptive_rate=True,
+    stopping_rounds=5,
+    stopping_metric="AUC",
+    overwrite_with_best_model=True,
+    seed=42
+)
+dl.train(x=x, y=y, training_frame=train, validation_frame=test)
+print(dl.auc(valid=True))
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+dl <- h2o.deeplearning(
+  x = x, y = y,
+  training_frame = train,
+  validation_frame = test,
+  hidden = c(200, 200),
+  epochs = 20,
+  activation = "RectifierWithDropout",
+  hidden_dropout_ratios = c(0.2, 0.2),
+  input_dropout_ratio = 0.1,
+  l1 = 1e-5,
+  l2 = 1e-5,
+  adaptive_rate = TRUE,
+  stopping_rounds = 5,
+  stopping_metric = "AUC",
+  overwrite_with_best_model = TRUE,
+  seed = 42
+)
+h2o.auc(dl, valid = TRUE)
+```
+
+</CodeGroup>
+
+---
+
+## Regularization
+
+Deep Learning models are prone to overfitting, especially on small datasets. H2O-3 provides multiple complementary regularization techniques:
+
+<Tabs>
+  <Tab title="Dropout">
+    Dropout randomly sets a fraction of neuron activations to zero during each training pass, forcing the network to learn redundant representations.
+
+    ```python
+    dl = H2ODeepLearningEstimator(
+        hidden=[500, 500],
+        activation="rectifier_with_dropout",
+        input_dropout_ratio=0.1,          # drop 10% of inputs
+        hidden_dropout_ratios=[0.5, 0.5], # drop 50% in each hidden layer
+    )
+    ```
+
+    <Note>
+      Dropout ratios apply **only** when using `"tanh_with_dropout"`, `"rectifier_with_dropout"`, or `"maxout_with_dropout"` activation. Setting `hidden_dropout_ratios` with a non-dropout activation has no effect.
+    </Note>
+  </Tab>
+  <Tab title="L1 / L2 Regularization">
+    L1 regularization produces sparse weight vectors (many weights exactly zero). L2 keeps all weights small but non-zero. Both can be combined:
+
+    ```python
+    dl = H2ODeepLearningEstimator(
+        hidden=[200, 200],
+        l1=1e-5,   # lasso-style sparsity
+        l2=1e-5,   # ridge-style shrinkage
+    )
+    ```
+  </Tab>
+  <Tab title="Early Stopping">
+    Stop training when validation performance stops improving:
+
+    ```python
+    dl = H2ODeepLearningEstimator(
+        hidden=[200, 200],
+        epochs=1000,                        # upper bound; early stopping may trigger first
+        overwrite_with_best_model=True,     # keep the best checkpoint (default)
+        stopping_rounds=5,
+        stopping_metric="AUC",
+        stopping_tolerance=0.001,
+        validation_frame=test,
+    )
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Tips for Deep Learning in H2O-3
+
+<Tip>
+  Deep Learning models in H2O-3 are **non-deterministic** by default for performance reasons (asynchronous multi-threaded gradient updates). To force reproducibility, set `reproducible=True` — but note this forces single-threaded training and will be significantly slower.
+</Tip>
+
+- Start with the default architecture `hidden=[200, 200]` and `activation="rectifier"`. Tune from there.
+- Use `adaptive_rate=True` (default) unless you want manual control over the learning schedule.
+- Grid search over `hidden` layer sizes and `l1`/`l2` regularization for best results.
+- For large datasets, increase `train_samples_per_iteration` or set it to `-2` (auto-tuning).
+- Export weights and biases for analysis via `export_weights_and_biases=True`.

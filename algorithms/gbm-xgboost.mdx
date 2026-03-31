@@ -1,0 +1,254 @@
+---
+title: "GBM & XGBoost"
+description: "Gradient Boosting Machine (H2O native) and XGBoost — two of H2O-3's most powerful supervised learning algorithms for regression and classification."
+---
+
+Both GBM and XGBoost are forward-learning ensemble methods that build regression trees sequentially, with each new tree correcting for the errors of the previous ones. They are among the most accurate algorithms on tabular data and are the typical winners of ML competitions.
+
+---
+
+## Gradient Boosting Machine (GBM)
+
+H2O's GBM sequentially builds regression trees on all features of the dataset in a **fully distributed way** — each tree is built in parallel across the cluster. It supports per-row observation weights, offsets, N-fold cross-validation, and a wide range of distribution functions.
+
+**MOJO Support:** GBM fully supports importing and exporting MOJOs for low-latency production scoring.
+
+## XGBoost
+
+H2O's XGBoost implementation is based on the native XGBoost library via JNI. It provides parallel tree boosting (GBDT/GBM) and is often faster than H2O GBM on large datasets, especially with GPU acceleration. It supports multicore via OpenMP and can use GPU backends (`backend="gpu"`).
+
+**MOJO Support:** XGBoost supports importing and exporting MOJOs.
+
+---
+
+## Key Parameters
+
+### Shared Parameters (GBM & XGBoost)
+
+<ParamField path="ntrees" type="int" default="50">
+  Number of trees to build. More trees generally improve accuracy but increase training time and risk of overfitting. Use early stopping (`stopping_rounds`) to find the optimal value automatically.
+</ParamField>
+
+<ParamField path="max_depth" type="int" default="5 (GBM), 6 (XGBoost)">
+  Maximum depth of each tree. Higher values increase model complexity. For GBM, `5` is a good default; XGBoost often benefits from shallower trees (`3–6`) when combined with more rounds.
+</ParamField>
+
+<ParamField path="learn_rate" type="float" default="0.1 (GBM), 0.3 (XGBoost)">
+  Step size shrinkage applied after each tree. Smaller values (e.g., `0.01`–`0.05`) require more trees but often yield better generalization. Alias: `eta` in XGBoost.
+</ParamField>
+
+<ParamField path="sample_rate" type="float" default="1.0 (GBM), 1.0 (XGBoost)">
+  Row-wise subsampling rate per tree (without replacement). Values in the range `0.5`–`0.8` add stochasticity and can improve generalization (Friedman 1999 stochastic GBM). Alias: `subsample` in XGBoost.
+</ParamField>
+
+<ParamField path="col_sample_rate" type="float" default="1.0">
+  Column subsampling rate per tree level (without replacement). Alias: `colsample_bylevel` in XGBoost.
+</ParamField>
+
+<ParamField path="col_sample_rate_per_tree" type="float" default="1.0">
+  Column subsampling rate per tree (without replacement). Multiplicative with `col_sample_rate`. Alias: `colsample_bytree` in XGBoost.
+</ParamField>
+
+<ParamField path="min_rows" type="float" default="10.0 (GBM), 1.0 (XGBoost)">
+  Minimum number of observations required in a leaf node. Increase to prevent overfitting on small datasets. R parameter name: `node_size`.
+</ParamField>
+
+<ParamField path="distribution" type="str" default="auto">
+  Loss function / response distribution. `"auto"` infers from the response column type. Options: `"gaussian"`, `"bernoulli"`, `"multinomial"`, `"poisson"`, `"gamma"`, `"tweedie"`, `"laplace"`, `"quantile"`, `"huber"`.
+</ParamField>
+
+### GBM-Specific Parameters
+
+<ParamField path="learn_rate_annealing" type="float" default="1.0">
+  Reduce `learn_rate` by this factor after every tree. E.g., `learn_rate=0.05, learn_rate_annealing=0.99` gives a decaying learning rate that converges faster than a fixed small rate.
+</ParamField>
+
+<ParamField path="histogram_type" type="str" default="AUTO">
+  How to bin continuous features for split-finding. Options: `"AUTO"`, `"UniformAdaptive"`, `"UniformRobust"`, `"Random"` (XRT-style), `"QuantilesGlobal"`, `"RoundRobin"`.
+</ParamField>
+
+### XGBoost-Specific Parameters
+
+<ParamField path="booster" type="str" default="gbtree">
+  Booster type: `"gbtree"` (tree-based), `"gblinear"` (linear), or `"dart"` (Dropout Additive Regression Trees).
+</ParamField>
+
+<ParamField path="backend" type="str" default="auto">
+  Compute backend: `"auto"` uses a GPU if available, otherwise CPU. Set `"gpu"` to force GPU, `"cpu"` to force CPU.
+</ParamField>
+
+<ParamField path="reg_lambda" type="float" default="1.0">
+  L2 regularization on leaf weights. Larger values reduce overfitting.
+</ParamField>
+
+<ParamField path="reg_alpha" type="float" default="0.0">
+  L1 regularization on leaf weights. Promotes sparsity.
+</ParamField>
+
+<ParamField path="tree_method" type="str" default="auto">
+  Tree construction algorithm: `"auto"`, `"exact"` (small/medium data), `"approx"`, or `"hist"` (fast histogram method, required for GPU).
+</ParamField>
+
+---
+
+## Code Examples
+
+<CodeGroup>
+
+```python Python (GBM)
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = train.columns
+x.remove(y)
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+gbm = H2OGradientBoostingEstimator(
+    ntrees=100,
+    max_depth=5,
+    learn_rate=0.05,
+    sample_rate=0.8,
+    col_sample_rate=0.8,
+    stopping_rounds=5,
+    stopping_metric="AUC",
+    seed=42
+)
+gbm.train(x=x, y=y, training_frame=train)
+print(gbm.auc(valid=True))
+```
+
+```python Python (XGBoost)
+import h2o
+from h2o.estimators.xgboost import H2OXGBoostEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [c for c in train.columns if c != y]
+train[y] = train[y].asfactor()
+test[y]  = test[y].asfactor()
+
+xgb = H2OXGBoostEstimator(
+    ntrees=200,
+    max_depth=6,
+    learn_rate=0.05,        # eta
+    sample_rate=0.8,        # subsample
+    col_sample_rate=0.8,    # colsample_bylevel
+    reg_lambda=1.0,
+    reg_alpha=0.0,
+    tree_method="hist",
+    seed=42
+)
+xgb.train(x=x, y=y, training_frame=train, validation_frame=test)
+print(xgb.auc(valid=True))
+```
+
+```r R (GBM)
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+gbm <- h2o.gbm(
+  x = x, y = y,
+  training_frame = train,
+  validation_frame = test,
+  ntrees = 100,
+  max_depth = 5,
+  learn_rate = 0.05,
+  sample_rate = 0.8,
+  col_sample_rate = 0.8,
+  stopping_rounds = 5,
+  stopping_metric = "AUC",
+  seed = 42
+)
+h2o.auc(gbm, valid = TRUE)
+```
+
+```r R (XGBoost)
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_5k.csv")
+test  <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(train), y)
+train[[y]] <- as.factor(train[[y]])
+test[[y]]  <- as.factor(test[[y]])
+
+xgb <- h2o.xgboost(
+  x = x, y = y,
+  training_frame = train,
+  validation_frame = test,
+  ntrees = 200,
+  max_depth = 6,
+  learn_rate = 0.05,
+  sample_rate = 0.8,
+  col_sample_rate = 0.8,
+  reg_lambda = 1.0,
+  tree_method = "hist",
+  seed = 42
+)
+h2o.auc(xgb, valid = TRUE)
+```
+
+</CodeGroup>
+
+---
+
+## GBM vs XGBoost: When to Use Which
+
+| Criterion | H2O GBM | XGBoost |
+|-----------|---------|---------|
+| Default `learn_rate` | 0.1 | 0.3 |
+| Default `max_depth` | 5 | 6 |
+| Default `sample_rate` | 1.0 | 1.0 |
+| GPU acceleration | No | Yes (`backend="gpu"`) |
+| Distribution functions | More options (Huber, custom) | Most standard options |
+| Categorical encoding | Native enum (no one-hot required) | Requires encoding |
+| Custom distribution | Yes (`custom_distribution_func`) | No |
+| Typical use case | General tabular; insurance, credit | Large datasets; competition-level accuracy |
+
+<Tip>
+  A common strategy is to run both GBM and XGBoost in AutoML and use the leaderboard to decide. When training manually, try XGBoost first on datasets with > 500k rows and GPU hardware; otherwise GBM's native categorical handling often gives an edge.
+</Tip>
+
+---
+
+## GPU Acceleration for XGBoost
+
+XGBoost in H2O-3 supports GPU-accelerated training via the `hist` tree method:
+
+```python Python
+xgb_gpu = H2OXGBoostEstimator(
+    ntrees=500,
+    max_depth=8,
+    learn_rate=0.05,
+    backend="gpu",        # use GPU
+    gpu_id=0,             # which GPU (default 0)
+    tree_method="hist",   # required for GPU
+    seed=42
+)
+xgb_gpu.train(x=x, y=y, training_frame=train)
+```
+
+<Note>
+  H2O-3 automatically loads the most capable XGBoost native library available (GPU+OMP > OMP > single-CPU fallback). Set `backend="auto"` to let H2O choose. GPU training requires `tree_method="hist"` or `tree_method="auto"`.
+</Note>

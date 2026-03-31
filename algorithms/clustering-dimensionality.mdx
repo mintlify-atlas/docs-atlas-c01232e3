@@ -1,0 +1,293 @@
+---
+title: "Clustering & Dimensionality Reduction"
+description: "H2O-3's unsupervised learning algorithms — K-Means for clustering and PCA for dimensionality reduction — plus a brief overview of Word2Vec for text embeddings."
+---
+
+H2O-3 includes several unsupervised algorithms for discovering structure in data without labeled responses: **K-Means** for partitioning observations into clusters, **PCA** for reducing dimensionality while preserving variance, and **Word2Vec** for generating word embeddings from text.
+
+---
+
+## K-Means Clustering
+
+K-Means falls in the general category of clustering algorithms. It partitions a set of observations into `k` groups such that observations within a group are more similar to each other than to observations in other groups. H2O's K-Means runs in a **distributed, parallel** fashion across the cluster.
+
+**MOJO Support:** K-Means supports exporting MOJOs (export only, not import).
+
+### Key Parameters
+
+<ParamField path="k" type="int" default="1">
+  Number of clusters. This is the most important parameter. Use domain knowledge or the elbow method to choose an appropriate value.
+</ParamField>
+
+<ParamField path="init" type="str" default="Furthest">
+  Cluster center initialization strategy:
+  - `"Furthest"` (default) — choose each subsequent center to be farthest from existing centers (Euclidean distance)
+  - `"PlusPlus"` — weighted random selection where points farther from existing centers are more likely to be chosen (K-Means++ algorithm)
+  - `"Random"` — uniformly random sample of `k` rows as initial centers
+  - `"User"` — provide explicit initial centers via `user_points`
+</ParamField>
+
+<ParamField path="max_iterations" type="int" default="10">
+  Maximum number of iterations for the K-Means algorithm to converge.
+</ParamField>
+
+<ParamField path="estimate_k" type="bool" default="False">
+  Automatically estimate the number of clusters (up to `k`) by iteratively trying `k=1, 2, 3, ...`. When enabled, the `init` parameter is ignored.
+</ParamField>
+
+<ParamField path="standardize" type="bool" default="True">
+  Standardize numeric columns before clustering. Strongly recommended so that features with larger numeric ranges don't dominate the distance calculation.
+</ParamField>
+
+<ParamField path="seed" type="int" default="-1">
+  Random seed for reproducibility.
+</ParamField>
+
+<ParamField path="user_points" type="H2OFrame">
+  (Only when `init="User"`) A data frame where each row is an initial cluster center. Must have the same number of columns as the training frame.
+</ParamField>
+
+### Code Examples
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.kmeans import H2OKMeansEstimator
+
+h2o.init()
+
+# Load iris dataset (classic clustering example)
+iris = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+
+# K-Means with k=3 clusters
+kmeans = H2OKMeansEstimator(
+    k=3,
+    init="PlusPlus",
+    max_iterations=100,
+    standardize=True,
+    seed=42
+)
+kmeans.train(
+    x=["sepal_len", "sepal_wid", "petal_len", "petal_wid"],
+    training_frame=iris
+)
+
+# Cluster centers
+print(kmeans.centers())
+
+# Within-cluster sum of squares
+print(kmeans.tot_withinss())
+
+# Predict cluster assignments
+assignments = kmeans.predict(iris)
+print(assignments.head())
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+iris <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+
+kmeans <- h2o.kmeans(
+  x = c("sepal_len", "sepal_wid", "petal_len", "petal_wid"),
+  training_frame = iris,
+  k = 3,
+  init = "PlusPlus",
+  max_iterations = 100,
+  standardize = TRUE,
+  seed = 42
+)
+
+# Cluster centers
+h2o.centers(kmeans)
+
+# Within-cluster SS
+h2o.tot_withinss(kmeans)
+
+# Assign clusters
+assignments <- h2o.predict(kmeans, iris)
+head(assignments)
+```
+
+</CodeGroup>
+
+### Choosing k — Elbow Method
+
+```python Python
+withinss = []
+k_range = range(1, 11)
+
+for k in k_range:
+    m = H2OKMeansEstimator(k=k, init="PlusPlus", seed=42)
+    m.train(x=["sepal_len", "sepal_wid", "petal_len", "petal_wid"], training_frame=iris)
+    withinss.append(m.tot_withinss())
+
+# Plot withinss vs k to find the "elbow"
+import matplotlib.pyplot as plt
+plt.plot(list(k_range), withinss, "bo-")
+plt.xlabel("k"); plt.ylabel("Total Within-Cluster SS")
+plt.title("K-Means Elbow Curve")
+plt.show()
+```
+
+---
+
+## Principal Component Analysis (PCA)
+
+PCA performs a transformation on possibly collinear features to produce a new set of **uncorrelated (orthogonal) features** called principal components. The components are ordered by the amount of variance they explain, so the first few components capture the most information.
+
+**Common uses:**
+- **Dimensionality reduction** — reduce a high-dimensional dataset to `k` principal components before feeding into a supervised model.
+- **Preprocessing** — orthogonalize features before distance-based algorithms (like K-Means).
+- **Visualization** — project data onto 2–3 components for plotting.
+
+**MOJO Support:** PCA supports exporting MOJOs (export only).
+
+### Key Parameters
+
+<ParamField path="k" type="int" default="1">
+  Number of principal components (rank of the matrix approximation). Must be between 1 and `min(nrows, ncols)`.
+</ParamField>
+
+<ParamField path="transform" type="str" default="none">
+  Numeric column transformation before computing PCA:
+  - `"none"` (default) — no transformation
+  - `"standardize"` — subtract mean and divide by standard deviation (recommended in most cases)
+  - `"normalize"` — scale to [0, 1]
+  - `"demean"` — subtract the mean only
+  - `"descale"` — divide by standard deviation only
+</ParamField>
+
+<ParamField path="pca_method" type="str" default="gram_s_v_d">
+  Algorithm for computing principal components:
+  - `"gram_s_v_d"` (default) — distributed Gram matrix + local SVD via JAMA
+  - `"power"` — power iteration method (experimental)
+  - `"randomized"` — randomized subspace iteration (fast for very large matrices)
+  - `"glrm"` — generalized low-rank model approach (experimental)
+</ParamField>
+
+<ParamField path="pca_impl" type="str" default="mtj_evd_symmmatrix">
+  Implementation for EVD/SVD computation:
+  - `"mtj_evd_symmmatrix"` (default) — EVD for symmetric matrix via MTJ
+  - `"mtj_evd_densematrix"` — EVD for dense matrix via MTJ
+  - `"mtj_svd_densematrix"` — SVD for dense matrix via MTJ
+  - `"jama"` — EVD for dense matrix via JAMA
+</ParamField>
+
+<ParamField path="max_iterations" type="int" default="1000">
+  Maximum number of iterations for iterative PCA methods (`power`, `randomized`, `glrm`).
+</ParamField>
+
+<ParamField path="use_all_factor_levels" type="bool" default="False">
+  Whether to use all factor levels when expanding categorical columns into indicators. By default the first level is skipped to avoid collinearity.
+</ParamField>
+
+### Code Examples
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.pca import H2OPrincipalComponentAnalysisEstimator
+
+h2o.init()
+
+train = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+
+pca = H2OPrincipalComponentAnalysisEstimator(
+    k=2,
+    transform="standardize",
+    pca_method="gram_s_v_d",
+    seed=42
+)
+pca.train(
+    x=["sepal_len", "sepal_wid", "petal_len", "petal_wid"],
+    training_frame=train
+)
+
+# Proportion of variance explained
+print(pca.varimp())
+
+# Project data onto principal components
+projected = pca.predict(train)
+print(projected.head())
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+train <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/iris/iris_wheader.csv")
+
+pca <- h2o.prcomp(
+  x = c("sepal_len", "sepal_wid", "petal_len", "petal_wid"),
+  training_frame = train,
+  k = 2,
+  transform = "standardize",
+  pca_method = "GramSVD",
+  seed = 42
+)
+
+# Variance explained
+h2o.varimp(pca)
+
+# Project
+projected <- h2o.predict(pca, train)
+head(projected)
+```
+
+</CodeGroup>
+
+### PCA as a Preprocessing Step
+
+```python Python
+# Step 1: Fit PCA on training data
+pca = H2OPrincipalComponentAnalysisEstimator(k=10, transform="standardize")
+pca.train(x=feature_cols, training_frame=train)
+
+# Step 2: Transform train and test
+train_pca = pca.predict(train)
+test_pca  = pca.predict(test)
+
+# Step 3: Append response column
+train_pca["response"] = train["response"]
+test_pca["response"]  = test["response"]
+
+# Step 4: Train a supervised model on the reduced features
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+gbm = H2OGradientBoostingEstimator(ntrees=100)
+gbm.train(y="response", training_frame=train_pca, validation_frame=test_pca)
+```
+
+---
+
+## Word2Vec
+
+H2O-3 includes a **Word2Vec** implementation for generating dense word embeddings from text data. Word2Vec learns vector representations of words such that words appearing in similar contexts have similar vectors.
+
+```python Python
+from h2o.estimators.word2vec import H2OWord2vecEstimator
+
+# Assume `words` is an H2OFrame with a single column of tokenized words
+w2v = H2OWord2vecEstimator(
+    vec_size=100,       # embedding dimension
+    window_size=5,      # context window
+    epochs=5,
+    sent_sample_rate=0.0,
+    init_learning_rate=0.025,
+    min_word_freq=5,
+)
+w2v.train(training_frame=words)
+
+# Get the embedding for a word
+embedding = w2v.transform(h2o.H2OFrame(["cat"]), aggregate_method="Average")
+
+# Aggregate sentence-level embeddings (average word vectors per row)
+sentence_embeddings = w2v.transform(sentence_frame, aggregate_method="Average")
+```
+
+<Note>
+  Word2Vec in H2O-3 operates on pre-tokenized data stored as a single-column H2OFrame of words. Use `h2o.H2OFrame.tokenize()` to split raw text into tokens before training.
+</Note>

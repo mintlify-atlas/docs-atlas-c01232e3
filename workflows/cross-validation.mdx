@@ -1,0 +1,257 @@
+---
+title: "Cross-Validation"
+description: "Use K-fold cross-validation in H2O-3 to estimate model performance without sacrificing a validation split, and access per-fold metrics and holdout predictions."
+---
+
+[K-fold cross-validation](https://en.wikipedia.org/wiki/Cross-validation_(statistics)#k-fold_cross-validation) estimates model performance without requiring a separate validation split. H2O-3 integrates cross-validation directly into the training process via the `nfolds` parameter.
+
+## How cross-validation works in H2O-3
+
+When you set `nfolds=5`, H2O-3 builds **6 models**:
+
+- **5 cross-validation models**, each trained on 80% of the data with a different 20% held out.
+- **1 main model**, trained on 100% of the training data.
+
+The main model is what you get back from H2O-3. Its cross-validation metrics are computed by combining the 5 holdout prediction sets into a single prediction for the full training dataset — where the model making a prediction for a given row never saw that row during training.
+
+<Note>Combining holdout predictions this way can yield slightly different results than averaging the 5 individual validation metrics, especially when fold sizes differ or when models converge to different local minima (e.g., small Deep Learning models).</Note>
+
+## Basic example
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+h2o.init()
+
+# Import the prostate dataset
+prostate = h2o.import_file("http://s3.amazonaws.com/h2o-public-test-data/smalldata/prostate/prostate.csv.zip")
+
+# Set response and predictors
+response = "CAPSULE"
+predictors = prostate.names[3:8]
+prostate['CAPSULE'] = prostate['CAPSULE'].asfactor()
+
+# Train a GBM with 5-fold cross-validation
+prostate_gbm = H2OGradientBoostingEstimator(nfolds=5, seed=1)
+prostate_gbm.train(x=predictors, y=response, training_frame=prostate)
+
+# AUC of the combined cross-validated holdout predictions
+prostate_gbm.auc(xval=True)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+df <- h2o.importFile("http://s3.amazonaws.com/h2o-public-test-data/smalldata/prostate/prostate.csv.zip")
+df[,"CAPSULE"] <- as.factor(df[,"CAPSULE"])
+
+# Train a GBM with 5-fold cross-validation
+model_fit <- h2o.gbm(x = 3:8, y = 2, training_frame = df, nfolds = 5, seed = 1)
+
+# AUC of the combined cross-validated holdout predictions
+h2o.auc(model_fit, xval = TRUE)
+```
+
+</CodeGroup>
+
+## Custom fold assignment with fold_column
+
+For structured data — such as time-series, geographic, or grouped data — random fold splitting can cause data leakage. Use `fold_column` to specify an explicit per-row fold assignment.
+
+<Warning>If rows from the same group appear in both training and holdout folds (due to random splitting), your cross-validation metrics will be overly optimistic. Use `fold_column` to prevent this.</Warning>
+
+<CodeGroup>
+
+```python Python
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+# Assume df already has a "city" column to segment by
+gbm = H2OGradientBoostingEstimator(seed=42)
+gbm.train(
+    x=predictors,
+    y=response,
+    training_frame=df,
+    fold_column="city"   # each city forms one fold
+)
+```
+
+```r R
+# Assume df already has a "city" column to segment by
+gbm_model <- h2o.gbm(
+    x = predictors,
+    y = response,
+    training_frame = df,
+    fold_column = "city"  # each city forms one fold
+)
+```
+
+</CodeGroup>
+
+## Keeping cross-validation predictions
+
+By default, holdout predictions and fold assignments are deleted from memory after training completes. Set `keep_cross_validation_predictions=True` to retain the per-fold prediction frames.
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.kmeans import H2OKMeansEstimator
+h2o.init()
+
+prostate = h2o.import_file("http://s3.amazonaws.com/h2o-public-test-data/smalldata/prostate/prostate.csv.zip")
+predictors = prostate.names[2:9]
+
+prostate_kmeans = H2OKMeansEstimator(
+    k=10,
+    nfolds=5,
+    keep_cross_validation_predictions=True
+)
+prostate_kmeans.train(x=predictors, training_frame=prostate)
+
+# List of per-fold prediction frames (one per fold)
+prostate_kmeans.cross_validation_predictions()
+
+# Single combined holdout prediction for the full training frame
+prostate_kmeans.cross_validation_holdout_predictions()
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+prostate <- h2o.importFile("http://s3.amazonaws.com/h2o-public-test-data/smalldata/prostate/prostate.csv.zip")
+
+fit <- h2o.kmeans(
+    training_frame = prostate,
+    k = 10,
+    x = c("AGE", "RACE", "VOL", "GLEASON"),
+    nfolds = 5,
+    keep_cross_validation_predictions = TRUE
+)
+
+# List of per-fold prediction frames (one per fold)
+fit@model[["cross_validation_predictions"]]
+
+# Single combined holdout prediction for the full training frame
+cvpreds <- h2o.getFrame(fit@model[["cross_validation_holdout_predictions_frame_id"]][["name"]])
+```
+
+</CodeGroup>
+
+## Keeping fold assignments
+
+To retain the fold assignment column used during cross-validation, set `keep_cross_validation_fold_assignment=True`.
+
+<CodeGroup>
+
+```python Python
+gbm = H2OGradientBoostingEstimator(
+    nfolds=5,
+    keep_cross_validation_fold_assignment=True,
+    seed=42
+)
+gbm.train(x=predictors, y=response, training_frame=train)
+
+# Retrieve the fold assignment frame
+fold_assignment = gbm.cross_validation_fold_assignment()
+```
+
+```r R
+gbm_model <- h2o.gbm(
+    x = predictors,
+    y = response,
+    training_frame = train,
+    nfolds = 5,
+    keep_cross_validation_fold_assignment = TRUE,
+    seed = 42
+)
+
+# Retrieve the fold assignment frame
+fold_assignment <- h2o.cross_validation_fold_assignment(gbm_model)
+```
+
+</CodeGroup>
+
+## Accessing cross-validation metrics
+
+<Steps>
+  <Step title="Train with nfolds">
+    Set `nfolds` greater than 1 when calling `train()`. H2O-3 will automatically build the K cross-validation models along with the main model.
+  </Step>
+  <Step title="Retrieve cross-validation performance">
+    Access the cross-validated metrics from the main model object using `xval=True` (Python) or `xval = TRUE` (R).
+
+    <CodeGroup>
+
+    ```python Python
+    # Overall cross-validation metrics
+    xval_perf = gbm.model_performance(xval=True)
+    print(xval_perf)
+
+    # Specific metrics
+    print(gbm.auc(xval=True))
+    print(gbm.rmse(xval=True))
+    ```
+
+    ```r R
+    # Overall cross-validation metrics
+    xval_perf <- h2o.performance(model = gbm_model, xval = TRUE)
+    print(xval_perf)
+
+    # Specific metrics
+    h2o.auc(gbm_model, xval = TRUE)
+    h2o.rmse(gbm_model, xval = TRUE)
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Inspect individual CV models">
+    Retrieve each cross-validation model to inspect per-fold metrics and diagnose variance.
+
+    <CodeGroup>
+
+    ```python Python
+    # Get the individual cross-validation models
+    cv_models = gbm.cross_validation_models()
+
+    # Inspect validation metrics for each fold model
+    for m in cv_models:
+        print(m.model_performance(valid=True).auc())
+    ```
+
+    ```r R
+    # Get the individual cross-validation models
+    cv_model_ids <- gbm_model@model[["cross_validation_models"]]
+
+    # Inspect validation metrics for each fold model
+    for (id in cv_model_ids) {
+        m <- h2o.getModel(id[["name"]])
+        print(h2o.auc(m, valid = TRUE))
+    }
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Cross-validation cleanup
+
+By default, when the main model finishes training, H2O-3 automatically removes these objects from memory:
+
+- Cross-validation models
+- Cross-validation metrics
+- Holdout predictions
+- Fold assignments
+
+Use the following flags to prevent deletion:
+
+| Flag | Purpose |
+|---|---|
+| `keep_cross_validation_models` | Retain the K fold models |
+| `keep_cross_validation_predictions` | Retain per-fold and combined holdout prediction frames |
+| `keep_cross_validation_fold_assignment` | Retain the fold assignment column |
+
+<Note>If training is interrupted by a timeout or manual cancellation, H2O-3 also attempts to remove the associated CV models and residuals from memory.</Note>

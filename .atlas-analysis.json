@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "H2O-3",
+  "projectType": "ai-ml",
+  "projectName": "H2O-3",
+  "projectDescription": "An open-source, distributed, in-memory machine learning platform supporting AutoML, GBM, XGBoost, Random Forest, Deep Learning, GLM, and more, accessible via Python, R, and a web UI.",
   "theme": "maple",
-  "colors": {
-    "primary": "#fae204",
-    "light": "#84740c",
-    "dark": "#303026"
-  },
-  "favicon": "https://media.brand.dev/a2905db9-6282-4da9-b8b6-7fb6bef56fb8.jpg",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/h2oai/h2o-3"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/h2oai/h2o-3"
-    }
-  },
+  "primaryColor": "#fae204",
+  "lightColor": "#84740c",
+  "darkColor": "#303026",
   "navigation": {
     "tabs": [
       {
@@ -105,5 +92,38 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "AutoML: Automatic model training, tuning, and leaderboard generation",
+    "Distributed in-memory computation via DKV and MRTask",
+    "Wide algorithm support: GBM, XGBoost, Random Forest, Deep Learning, GLM, GAM, K-Means, PCA, Naive Bayes, Word2Vec",
+    "Stacked Ensembles for improved model performance",
+    "MOJO/POJO export for low-latency production scoring",
+    "Python, R, Scala, Java, and REST API clients",
+    "Flow web UI for interactive data exploration and modeling",
+    "Model explainability: SHAP, PDP, variable importance, residual analysis",
+    "Grid search and hyperparameter tuning",
+    "Hadoop, Spark (Sparkling Water), Kubernetes, and Docker support"
+  ],
+  "publicApiSurface": [
+    "h2o.init() / h2o.connect()",
+    "h2o.import_file() / h2o.upload_file()",
+    "H2OFrame",
+    "H2OAutoML",
+    "H2OGradientBoostingEstimator",
+    "H2OXGBoostEstimator",
+    "H2ORandomForestEstimator",
+    "H2ODeepLearningEstimator",
+    "H2OGeneralizedLinearEstimator",
+    "H2OGeneralizedAdditiveEstimator",
+    "H2OKMeansEstimator",
+    "H2OPrincipalComponentAnalysisEstimator",
+    "H2OStackedEnsembleEstimator",
+    "model.predict()",
+    "model.explain()",
+    "model.download_mojo() / model.download_pojo()",
+    "h2o.save_model() / h2o.load_model()",
+    "h2o.grid() for hyperparameter search",
+    "REST API: /3/ModelBuilders/<algo>, /3/AutoML, /3/Frames, /3/Models"
+  ]
 }

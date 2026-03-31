@@ -1,0 +1,442 @@
+---
+title: "Model Methods"
+description: "Methods and properties available on all trained H2O model objects, including prediction, performance evaluation, variable importance, explainability, and model export."
+---
+
+All trained H2O models are instances of `ModelBase` (the base class) or one of its subclasses. These methods are available on every model returned by an estimator's `train()` call or loaded via `h2o.load_model()`.
+
+```python
+from h2o.model.model_base import ModelBase
+```
+
+---
+
+## Prediction
+
+### predict
+
+```python
+predictions = model.predict(test_data, custom_metric=None, custom_metric_func=None)
+```
+
+Generate predictions for a new dataset.
+
+<ParamField path="test_data" type="H2OFrame" required>
+  Dataset to score. Must contain the same predictor columns used during training.
+</ParamField>
+
+<ParamField path="custom_metric" type="class">
+  A custom evaluation function class reference, uploaded to the cluster before scoring.
+</ParamField>
+
+<ParamField path="custom_metric_func" type="string">
+  Reference to a previously uploaded custom metric function (e.g., result of `h2o.upload_custom_metric()`). Cannot be specified together with `custom_metric`.
+</ParamField>
+
+Returns an `H2OFrame`. For classification models, the frame contains:
+- `predict` — the predicted class label
+- `p0`, `p1`, ... — predicted probabilities for each class
+
+```python
+pred = model.predict(test)
+pred.head()
+```
+
+---
+
+## Performance evaluation
+
+### model_performance
+
+```python
+perf = model.model_performance(test_data=None, train=False, valid=False, xval=False, auc_type="none")
+```
+
+Compute and return model performance metrics.
+
+<ParamField path="test_data" type="H2OFrame">
+  Compute metrics on this dataset. Takes precedence over `train`, `valid`, and `xval` flags.
+</ParamField>
+
+<ParamField path="train" type="boolean" default="False">
+  Return metrics from the training set.
+</ParamField>
+
+<ParamField path="valid" type="boolean" default="False">
+  Return metrics from the validation set.
+</ParamField>
+
+<ParamField path="xval" type="boolean" default="False">
+  Return cross-validation metrics.
+</ParamField>
+
+<ParamField path="auc_type" type="string" default="none">
+  AUC type for multinomial classification when `test_data` is provided. One of: `"auto"`, `"none"`, `"macro_ovr"`, `"weighted_ovr"`, `"macro_ovo"`, `"weighted_ovo"`.
+</ParamField>
+
+Returns a metrics object (subclass of `MetricsBase`) with metric accessors such as `.auc()`, `.mse()`, `.rmse()`, `.logloss()`, `.r2()`, `.confusion_matrix()`.
+
+```python
+perf = model.model_performance(test_data=test)
+print(perf.auc())
+print(perf.mse())
+print(perf.confusion_matrix())
+```
+
+---
+
+### cross_validation_metrics_summary
+
+```python
+summary = model.cross_validation_metrics_summary()
+```
+
+Return a summary table of cross-validation metrics across all folds. Available only when the model was trained with `nfolds >= 2`.
+
+Returns an `H2OTwoDimTable` with mean, standard deviation, and per-fold values for each metric.
+
+```python
+cv_summary = model.cross_validation_metrics_summary()
+cv_summary
+```
+
+---
+
+## Variable importance
+
+### varimp
+
+```python
+importance = model.varimp(use_pandas=False)
+```
+
+Return variable importances for tree-based models (GBM, XGBoost, DRF) and linear models (GLM).
+
+<ParamField path="use_pandas" type="boolean" default="False">
+  Return results as a Pandas DataFrame when `True`. Returns a list of tuples otherwise.
+</ParamField>
+
+```python
+vi = model.varimp(use_pandas=True)
+print(vi)
+```
+
+---
+
+### varimp_plot
+
+```python
+model.varimp_plot(num_of_features=None, server=False, save_plot_path=None)
+```
+
+Plot variable importances as a horizontal bar chart.
+
+<ParamField path="num_of_features" type="integer">
+  Maximum number of features to display. Shows all features if `None`.
+</ParamField>
+
+<ParamField path="server" type="boolean" default="False">
+  Run in non-interactive server mode (saves plot instead of rendering).
+</ParamField>
+
+<ParamField path="save_plot_path" type="string">
+  File path to save the plot image. Requires `server=True` or a file extension.
+</ParamField>
+
+```python
+model.varimp_plot(num_of_features=20)
+```
+
+---
+
+## Explainability
+
+### explain
+
+```python
+explanation = model.explain(frame, columns=None, top_n_features=10, include_explanations="ALL")
+```
+
+Generate a comprehensive suite of model explanations for a given dataset. Returns a collection of plots and tables including variable importance, partial dependence plots, SHAP values, and more.
+
+<ParamField path="frame" type="H2OFrame" required>
+  Dataset to use for generating explanations.
+</ParamField>
+
+<ParamField path="top_n_features" type="integer" default="10">
+  Number of top features to include in each explanation.
+</ParamField>
+
+```python
+expl = model.explain(test)
+```
+
+---
+
+### explain_row
+
+```python
+explanation = model.explain_row(frame, row_index, columns=None, top_n_features=10)
+```
+
+Generate explanations for a single row in a dataset. Useful for understanding individual predictions.
+
+<ParamField path="frame" type="H2OFrame" required>
+  Dataset containing the row to explain.
+</ParamField>
+
+<ParamField path="row_index" type="integer" required>
+  Zero-based index of the row to explain.
+</ParamField>
+
+```python
+row_expl = model.explain_row(test, row_index=0)
+```
+
+---
+
+## Model export
+
+### download_mojo
+
+```python
+path = model.download_mojo(path=".", get_genmodel_jar=False, genmodel_name="")
+```
+
+Download the model in MOJO (Model Object, Optimized) format to the local machine. MOJOs are compact binary files that can be used for scoring without an H2O cluster.
+
+<ParamField path="path" type="string" default=".">
+  Local directory where the MOJO file will be saved.
+</ParamField>
+
+<ParamField path="get_genmodel_jar" type="boolean" default="False">
+  Also download `h2o-genmodel.jar` to the same directory. Required for scoring with the MOJO outside of H2O.
+</ParamField>
+
+<ParamField path="genmodel_name" type="string">
+  Custom filename for the genmodel jar. Defaults to `h2o-genmodel.jar`.
+</ParamField>
+
+Returns the filename of the saved MOJO file.
+
+```python
+mojo_path = model.download_mojo(path="/tmp/mojo", get_genmodel_jar=True)
+```
+
+<Tip>
+  MOJO export is supported by GBM, XGBoost, DRF, GLM, DeepLearning, and Stacked Ensemble models.
+</Tip>
+
+---
+
+### download_pojo
+
+```python
+path = model.download_pojo(path="", get_genmodel_jar=False, genmodel_name="")
+```
+
+Download the model as a Plain Old Java Object (POJO). If `path` is an empty string, the Java source code is printed to stdout instead.
+
+<ParamField path="path" type="string" default="">
+  Absolute path to the directory where the POJO `.java` file will be saved. When empty, prints to stdout.
+</ParamField>
+
+<ParamField path="get_genmodel_jar" type="boolean" default="False">
+  Also download `h2o-genmodel.jar` to the same directory.
+</ParamField>
+
+<ParamField path="genmodel_name" type="string">
+  Custom filename for the genmodel jar.
+</ParamField>
+
+```python
+model.download_pojo(path="/tmp/pojo", get_genmodel_jar=True)
+```
+
+---
+
+### save_model_details
+
+```python
+path = model.save_model_details(path="", force=False, filename=None)
+```
+
+Save detailed model information in JSON format to disk on the server's file system.
+
+<ParamField path="path" type="string" default="">
+  Directory on the server where the JSON file will be saved.
+</ParamField>
+
+<ParamField path="force" type="boolean" default="False">
+  Overwrite any existing file at the destination.
+</ParamField>
+
+<ParamField path="filename" type="string">
+  Custom filename. Defaults to `<model_id>.json`.
+</ParamField>
+
+Returns the path of the saved JSON file.
+
+---
+
+## Parameters and metadata
+
+### params
+
+```python
+model.params  # dict
+```
+
+Dictionary of all model parameters with their default, actual, and input values.
+
+```python
+{
+    "ntrees": {"default": 50, "actual": 100, "input": 100},
+    "max_depth": {"default": 5, "actual": 5, "input": 5},
+    ...
+}
+```
+
+---
+
+### actual_params
+
+```python
+model.actual_params  # dict
+```
+
+Dictionary of the actual parameter values used to train the model.
+
+```python
+params = model.actual_params
+print(params["ntrees"])
+print(params["learn_rate"])
+```
+
+---
+
+### model_id
+
+```python
+model.model_id  # str
+```
+
+The unique string identifier for this model in the H2O cluster.
+
+---
+
+### type
+
+```python
+model.type  # str
+```
+
+The model type. One of `"classifier"`, `"regressor"`, or `"unsupervised"`.
+
+---
+
+### have_mojo / have_pojo
+
+```python
+model.have_mojo  # bool
+model.have_pojo  # bool
+```
+
+Whether this model supports MOJO or POJO export.
+
+---
+
+## Training metadata
+
+### scoring_history
+
+```python
+history = model.scoring_history(as_data_frame=True)
+```
+
+Retrieve the model's score history over training iterations.
+
+<ParamField path="as_data_frame" type="boolean" default="True">
+  Return as a Pandas DataFrame. When `False`, returns an `H2OTwoDimTable`.
+</ParamField>
+
+---
+
+### start_time / end_time / run_time
+
+```python
+model.start_time   # int (milliseconds since epoch)
+model.end_time     # int (milliseconds since epoch)
+model.run_time     # int (milliseconds)
+```
+
+Timestamps and duration of model training.
+
+---
+
+## Cross-validation
+
+### is_cross_validated
+
+```python
+model.is_cross_validated()  # bool
+```
+
+Returns `True` if the model was trained with cross-validation.
+
+---
+
+### xvals
+
+```python
+cv_models = model.xvals  # list[H2OModel]
+```
+
+List of cross-validation sub-models.
+
+---
+
+## SHAP values
+
+### predict_contributions
+
+```python
+shap = model.predict_contributions(
+    test_data,
+    output_format="Original",
+    top_n=None,
+    bottom_n=None,
+    compare_abs=False,
+    background_frame=None,
+    output_space=False
+)
+```
+
+Compute SHAP (SHapley Additive exPlanations) feature contribution values. Available for GBM, XGBoost, and DRF models.
+
+<ParamField path="test_data" type="H2OFrame" required>
+  Dataset to compute SHAP values for.
+</ParamField>
+
+<ParamField path="output_format" type="string" default="Original">
+  Feature contribution output format for XGBoost. `"Original"` (per one-hot encoded feature) or `"Compact"` (per original feature).
+</ParamField>
+
+<ParamField path="top_n" type="integer">
+  Return only the top N highest SHAP contributions. Pass `-1` to sort all contributions in descending order.
+</ParamField>
+
+<ParamField path="bottom_n" type="integer">
+  Return only the bottom N lowest SHAP contributions.
+</ParamField>
+
+<ParamField path="background_frame" type="H2OFrame">
+  Reference frame for marginal SHAP (when `output_per_reference=False`) or baseline SHAP values.
+</ParamField>
+
+Returns an `H2OFrame` with shape `(nrows, nfeatures + 1)`. Each column is the SHAP contribution of one feature; the last column is the model bias.
+
+```python
+contributions = model.predict_contributions(test)
+contributions.head()
+```

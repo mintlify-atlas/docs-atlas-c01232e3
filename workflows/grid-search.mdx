@@ -1,0 +1,408 @@
+---
+title: "Grid Search & Hyperparameter Tuning"
+description: "Use H2O-3's cartesian and random grid search to tune hyperparameters, apply stopping criteria, and identify the best-performing model."
+---
+
+H2O-3 supports two types of grid search: **Cartesian** (exhaustive) and **Random**. Both search strategies produce an `H2OGridSearch` object (Python) / `H2OGrid` object (R) that stores all trained models and their metrics.
+
+## Cartesian vs random search
+
+<Tabs>
+  <Tab title="Cartesian search">
+    Cartesian search trains a model for **every combination** of the specified hyperparameter values. If you specify 2 values for `learn_rate`, 3 for `max_depth`, and 3 for `col_sample_rate`, cartesian search trains 2 × 3 × 3 = 18 models.
+
+    Use cartesian search when the hyperparameter space is small enough to explore exhaustively.
+  </Tab>
+  <Tab title="Random search">
+    Random search samples uniformly from all possible hyperparameter combinations. You control when it stops using `max_models`, `max_runtime_secs`, or metric-based early stopping criteria.
+
+    Use random search when the hyperparameter space is large and exhaustive search would be too slow.
+  </Tab>
+  <Tab title="Sequential search">
+    Sequential search iterates through parameter lists in order (all lists must have the same length). Supports `early_stopping` to halt when performance plateaus.
+  </Tab>
+</Tabs>
+
+## Cartesian grid search example
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+from h2o.grid.grid_search import H2OGridSearch
+h2o.init()
+
+# Import data
+data = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_10k.csv")
+test = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = data.columns
+x.remove(y)
+
+data[y] = data[y].asfactor()
+test[y] = test[y].asfactor()
+
+ss = data.split_frame(seed=1)
+train = ss[0]
+valid = ss[1]
+
+# Define hyperparameter space
+gbm_params = {
+    'learn_rate': [0.01, 0.1],
+    'max_depth': [3, 5, 9],
+    'sample_rate': [0.8, 1.0],
+    'col_sample_rate': [0.2, 0.5, 1.0]
+}
+
+# Train cartesian grid (all 2×3×2×3 = 36 combinations)
+gbm_grid = H2OGridSearch(
+    model=H2OGradientBoostingEstimator,
+    grid_id='gbm_grid1',
+    hyper_params=gbm_params
+)
+gbm_grid.train(x=x, y=y, training_frame=train, validation_frame=valid, ntrees=100, seed=1)
+
+# Sort results by validation AUC
+gbm_gridperf = gbm_grid.get_grid(sort_by='auc', decreasing=True)
+gbm_gridperf
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Import data
+data <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_train_10k.csv")
+test <- h2o.importFile("https://s3.amazonaws.com/h2o-public-test-data/smalldata/higgs/higgs_test_5k.csv")
+
+y <- "response"
+x <- setdiff(names(data), y)
+
+data[, y] <- as.factor(data[, y])
+test[, y] <- as.factor(test[, y])
+
+ss <- h2o.splitFrame(data, seed = 1)
+train <- ss[[1]]
+valid <- ss[[2]]
+
+# Define hyperparameter space
+gbm_params <- list(
+    learn_rate = c(0.01, 0.1),
+    max_depth = c(3, 5, 9),
+    sample_rate = c(0.8, 1.0),
+    col_sample_rate = c(0.2, 0.5, 1.0)
+)
+
+# Train cartesian grid (all 2×3×2×3 = 36 combinations)
+gbm_grid <- h2o.grid("gbm", x = x, y = y,
+                     grid_id = "gbm_grid1",
+                     training_frame = train,
+                     validation_frame = valid,
+                     ntrees = 100,
+                     seed = 1,
+                     hyper_params = gbm_params)
+
+# Sort results by validation AUC
+gbm_gridperf <- h2o.getGrid(grid_id = "gbm_grid1", sort_by = "auc", decreasing = TRUE)
+print(gbm_gridperf)
+```
+
+</CodeGroup>
+
+## Random grid search example
+
+<CodeGroup>
+
+```python Python
+# Larger hyperparameter space, explored with random search
+gbm_params2 = {
+    'learn_rate': [i * 0.01 for i in range(1, 11)],
+    'max_depth': list(range(2, 11)),
+    'sample_rate': [i * 0.1 for i in range(5, 11)],
+    'col_sample_rate': [i * 0.1 for i in range(1, 11)]
+}
+
+# Stop after 36 models
+search_criteria = {'strategy': 'RandomDiscrete', 'max_models': 36, 'seed': 1}
+
+gbm_grid2 = H2OGridSearch(
+    model=H2OGradientBoostingEstimator,
+    grid_id='gbm_grid2',
+    hyper_params=gbm_params2,
+    search_criteria=search_criteria
+)
+gbm_grid2.train(x=x, y=y, training_frame=train, validation_frame=valid, ntrees=100, seed=1)
+
+gbm_gridperf2 = gbm_grid2.get_grid(sort_by='auc', decreasing=True)
+gbm_gridperf2
+```
+
+```r R
+# Larger hyperparameter space, explored with random search
+gbm_params2 <- list(
+    learn_rate = seq(0.01, 0.1, 0.01),
+    max_depth = seq(2, 10, 1),
+    sample_rate = seq(0.5, 1.0, 0.1),
+    col_sample_rate = seq(0.1, 1.0, 0.1)
+)
+
+# Stop after 36 models
+search_criteria <- list(strategy = "RandomDiscrete", max_models = 36, seed = 1)
+
+gbm_grid2 <- h2o.grid("gbm", x = x, y = y,
+                      grid_id = "gbm_grid2",
+                      training_frame = train,
+                      validation_frame = valid,
+                      ntrees = 100,
+                      seed = 1,
+                      hyper_params = gbm_params2,
+                      search_criteria = search_criteria)
+
+gbm_gridperf2 <- h2o.getGrid(grid_id = "gbm_grid2", sort_by = "auc", decreasing = TRUE)
+print(gbm_gridperf2)
+```
+
+</CodeGroup>
+
+## Search criteria
+
+The `search_criteria` parameter (Python: dict, R: named list) controls the search strategy and stopping conditions.
+
+### Strategy options
+
+| Strategy | Description |
+|---|---|
+| `"Cartesian"` | Default. Trains all combinations of the hyperparameter space. |
+| `"RandomDiscrete"` | Randomly samples from the hyperparameter space. Requires at least one stopping criterion. |
+| `"Sequential"` | Iterates through parameter lists in sequence (all lists must have the same length). |
+
+### Stopping criteria examples
+
+<CodeGroup>
+
+```python Python
+# Stop after 10 models
+{'strategy': 'RandomDiscrete', 'max_models': 10, 'seed': 1}
+
+# Stop after 1 hour
+{'strategy': 'RandomDiscrete', 'max_runtime_secs': 3600}
+
+# Stop after 42 models or 8 hours, whichever comes first
+{'strategy': 'RandomDiscrete', 'max_models': 42, 'max_runtime_secs': 28800}
+
+# Stop when the metric stops improving
+{'strategy': 'RandomDiscrete', 'stopping_tolerance': 0.001, 'stopping_rounds': 10}
+
+# Stop when misclassification stops improving (more sensitive threshold)
+{'strategy': 'RandomDiscrete', 'stopping_metric': 'misclassification',
+ 'stopping_tolerance': 0.0005, 'stopping_rounds': 5}
+```
+
+```r R
+# Stop after 10 models
+list(strategy = "RandomDiscrete", max_models = 10, seed = 1)
+
+# Stop after 1 hour
+list(strategy = "RandomDiscrete", max_runtime_secs = 3600)
+
+# Stop after 42 models or 8 hours, whichever comes first
+list(strategy = "RandomDiscrete", max_models = 42, max_runtime_secs = 28800)
+
+# Stop when the metric stops improving
+list(strategy = "RandomDiscrete", stopping_tolerance = 0.001, stopping_rounds = 10)
+
+# Stop when misclassification stops improving
+list(strategy = "RandomDiscrete", stopping_metric = "misclassification",
+     stopping_tolerance = 0.0005, stopping_rounds = 5)
+```
+
+</CodeGroup>
+
+<Tip>Combine `max_models` and `max_runtime_secs` to bound grid search by both count and time. Either condition will trigger early termination when reached.</Tip>
+
+## Getting the best model
+
+<Steps>
+  <Step title="Sort the grid by a metric">
+    Call `get_grid()` (Python) or `h2o.getGrid()` (R) with `sort_by` to rank models.
+
+    <CodeGroup>
+
+    ```python Python
+    sorted_grid = gbm_grid.get_grid(sort_by='auc', decreasing=True)
+    ```
+
+    ```r R
+    sorted_grid <- h2o.getGrid(grid_id = "gbm_grid1", sort_by = "auc", decreasing = TRUE)
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Retrieve the best model">
+    The top model is the first entry in the sorted result.
+
+    <CodeGroup>
+
+    ```python Python
+    # Best model (highest AUC)
+    best_model = sorted_grid.models[0]
+    ```
+
+    ```r R
+    # Best model (highest AUC)
+    best_model <- h2o.getModel(sorted_grid@model_ids[[1]])
+    ```
+
+    </CodeGroup>
+  </Step>
+  <Step title="Evaluate on a holdout test set">
+    Evaluate the best model on a fresh test set to get an unbiased performance estimate.
+
+    <CodeGroup>
+
+    ```python Python
+    best_perf = best_model.model_performance(test)
+    print(best_perf.auc())
+    # 0.7781778619721595
+    ```
+
+    ```r R
+    best_perf <- h2o.performance(model = best_model, newdata = test)
+    h2o.auc(best_perf)
+    # [1] 0.7781779
+    ```
+
+    </CodeGroup>
+  </Step>
+</Steps>
+
+## Parallelism
+
+The `parallelism` parameter controls how many models are built simultaneously on the H2O leader node.
+
+| Value | Behavior |
+|---|---|
+| `1` | Sequential building (default). |
+| `0` | Adaptive — H2O decides based on available resources. |
+| `N > 1` | Build exactly N models in parallel. |
+
+<Note>Parallel grid search speeds things up mainly for small datasets on large clusters. For big data, sequential scheduling yields the highest performance since each model training already uses the full cluster.</Note>
+
+## Saving and loading a grid
+
+H2O-3 can save and reload a grid even after a cluster restart.
+
+### Auto-checkpointing
+
+<CodeGroup>
+
+```python Python
+import tempfile
+checkpoints_dir = tempfile.mkdtemp()
+
+gbm_grid = H2OGridSearch(
+    model=H2OGradientBoostingEstimator,
+    grid_id='gbm_grid',
+    hyper_params=gbm_params,
+    export_checkpoints_dir=checkpoints_dir
+)
+gbm_grid.train(x=x, y=y, training_frame=train, validation_frame=valid, ntrees=100, seed=1)
+
+grid_id = gbm_grid.grid_id
+
+# After a cluster restart, reload the grid
+h2o.remove_all()
+grid = h2o.load_grid(checkpoints_dir + "/" + grid_id)
+```
+
+```r R
+gbm_grid <- h2o.grid("gbm", x = x, y = y,
+                     grid_id = "gbm_grid_test",
+                     training_frame = train,
+                     validation_frame = valid,
+                     ntrees = 100, seed = 1,
+                     hyper_params = gbm_params,
+                     export_checkpoints_dir = tempdir())
+
+grid_id <- gbm_grid@grid_id
+
+# After a cluster restart, reload the grid
+h2o.removeAll()
+grid <- h2o.loadGrid(paste0(tempdir(), "/", grid_id))
+```
+
+</CodeGroup>
+
+### Manual save and load
+
+<CodeGroup>
+
+```python Python
+# Save grid manually
+saved_path = h2o.save_grid(checkpoints_dir, gbm_grid.grid_id)
+
+# Reload after cluster restart
+h2o.remove_all()
+grid = h2o.load_grid(saved_path)
+```
+
+```r R
+# Save grid manually
+saved_path <- h2o.saveGrid(grid_directory = tempdir(), grid_id = grid_id)
+
+# Reload after cluster restart
+h2o.removeAll()
+grid <- h2o.loadGrid(saved_path)
+```
+
+</CodeGroup>
+
+## Fault-tolerant grid search
+
+Set `recovery_dir` to enable automatic progress recovery if the cluster crashes mid-training. On restart, reload the grid with `load_params_references=True` and resume training with the same `grid_id` and hyperparameter spec.
+
+<CodeGroup>
+
+```python Python
+gbm_grid = H2OGridSearch(
+    model=H2OGradientBoostingEstimator,
+    grid_id='gbm_grid',
+    hyper_params=hyper_parameters,
+    recovery_dir="hdfs://nameNode/user/john/gbm_grid_recovery"
+)
+gbm_grid.train(x=list(range(4)), y=4, training_frame=iris)
+
+# On a new cluster, resume from last successful model
+grid = h2o.load_grid(
+    "hdfs://nameNode/user/john/gbm_grid_recovery/gbm_grid",
+    load_params_references=True
+)
+train = h2o.get_frame("iris")
+grid.hyper_params = hyper_parameters
+grid.train(x=list(range(4)), y=4, training_frame=train)
+```
+
+```r R
+gbm_grid <- h2o.grid(
+    "gbm", x = 1:4, y = 5,
+    grid_id = "gbm_grid", training_frame = iris,
+    hyper_params = hyper_parameters,
+    recovery_dir = "hdfs://nameNode/user/john/gbm_grid_recovery"
+)
+
+# On a new cluster, resume from last successful model
+h2o.loadGrid(
+    "hdfs://nameNode/user/john/gbm_grid_recovery/gbm_grid",
+    load_params_references = TRUE
+)
+iris <- h2o.getFrame("iris")
+grid <- h2o.grid(
+    "gbm", grid_id = "gbm_grid", x = 1:4, y = 5,
+    training_frame = iris,
+    hyper_params = hyper_parameters
+)
+```
+
+</CodeGroup>

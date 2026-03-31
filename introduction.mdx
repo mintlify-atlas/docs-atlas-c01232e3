@@ -1,0 +1,115 @@
+---
+title: "Introduction"
+description: "H2O-3 is an open-source, distributed, in-memory machine learning platform for Python, R, Java, Scala, and the web."
+keywords: ["h2o", "machine learning", "distributed", "automl", "open source"]
+---
+
+H2O-3 is an open source, in-memory, distributed, fast, and scalable machine learning and predictive analytics platform. It lets you build machine learning models on big data and provides easy productionalization of those models in an enterprise environment.
+
+<Note>
+  H2O-3 is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0). Source code, issue tracking, and community discussion are available on [GitHub](https://github.com/h2oai/h2o-3).
+</Note>
+
+## What is H2O-3?
+
+H2O-3 is an in-memory platform for distributed, scalable machine learning. Its core code is written in Java. A distributed key-value store is used to access and reference data, models, and objects across all nodes and machines. Algorithms are implemented on top of H2O-3's distributed map-reduce framework and use the Java fork/join framework for multi-threading.
+
+Data is read in parallel, distributed across the cluster, stored in-memory in a columnar compressed format. H2O's data parser has built-in intelligence to guess the schema of incoming datasets and supports data ingest from multiple sources in various formats.
+
+## Supported algorithms
+
+H2O-3 includes production-ready implementations of the following algorithms:
+
+- **AdaBoost** — boosting ensemble for classification
+- **AutoML** — fully automatic model training and selection
+- **Cox Proportional Hazards (CoxPH)** — survival analysis
+- **Decision Tree** — single decision tree learner
+- **Deep Learning** — multi-layer neural networks
+- **Distributed Random Forest (DRF)** — tree-based ensemble
+- **Distributed Uplift Random Forest** — treatment effect estimation
+- **Extended Isolation Forest** — anomaly detection
+- **Generalized Additive Models (GAM)** — flexible semi-parametric models
+- **Generalized Linear Model (GLM)** — linear, logistic, and Poisson regression
+- **Generalized Low Rank Models (GLRM)** — matrix factorization
+- **Gradient Boosting Machine (GBM)** — tree boosting for regression and classification
+- **Isolation Forest** — anomaly detection via random partitioning
+- **Isotonic Regression** — monotone regression
+- **K-Means Clustering** — unsupervised partitioning
+- **Naïve Bayes Classifier** — probabilistic classification
+- **Principal Component Analysis (PCA)** — dimensionality reduction
+- **RuleFit** — interpretable rule-based model
+- **Stacked Ensembles** — meta-learner combining base models
+- **Support Vector Machine (PSVM)** — kernel-based classification
+- **Target Encoding** — categorical feature preprocessing
+- **Word2Vec** — word embedding from text
+- **XGBoost** — optimized gradient boosting
+
+## Multi-language support
+
+H2O-3 exposes a consistent API across multiple languages and interfaces. All client libraries communicate with the H2O-3 backend through the REST API.
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="python" href="/quickstart">
+    Install via `pip install h2o`. Full-featured client with estimators, frames, and AutoML.
+  </Card>
+  <Card title="R" icon="r-project" href="/quickstart">
+    Install via `install.packages("h2o")`. Mirrors the Python API with idiomatic R conventions.
+  </Card>
+  <Card title="Flow UI" icon="display" href="/quickstart">
+    Browser-based notebook interface available at `http://localhost:54321` when the cluster is running.
+  </Card>
+  <Card title="REST API" icon="code" href="/api/rest/overview">
+    JSON over HTTP. All capabilities of H2O-3 are accessible from any language or tool.
+  </Card>
+</CardGroup>
+
+<Info>
+  Java and Scala users can access H2O-3 through the REST API or by embedding H2O-3 as a Maven artifact in their projects.
+</Info>
+
+## Architecture overview
+
+### Cluster model
+
+An H2O-3 cluster is a set of JVM processes (nodes) that work together as a single distributed system. Nodes communicate peer-to-peer — there is no designated master node for data distribution.
+
+- **Cluster formation**: New H2O-3 nodes join during launch using multicast or flatfile-based discovery. Once a job starts, the cluster locks and prevents new members from joining.
+- **In-memory storage**: Data is stored across all nodes in a columnar compressed format. Each column (`Vec`) is split into contiguous subsets (`Chunk`) distributed across the cluster.
+- **Distributed computation**: MRTask (Map/Reduce) moves computation to the data rather than moving data to the computation. Results reduce up a tree back to the initiating node.
+
+### Distributed key-value store (DKV)
+
+Every object — frames, models, chunks — has a home node determined by consistent hashing of its key. The DKV is used to locate and access all distributed objects:
+
+```
+DKV.put(key, value)   // store an object
+DKV.get(key)          // retrieve an object from its home node
+```
+
+### REST API
+
+H2O-3's REST API allows access to all capabilities from an external program or script through JSON over HTTP. The REST API is used by:
+
+- The Flow web UI
+- The R binding (`H2O-R`)
+- The Python binding (`H2O-Python`)
+- Any custom integration
+
+The default port for the REST API is **54321**. The internal communication port is **54322**.
+
+## Key sections
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Train your first model in Python or R in under 5 minutes.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install H2O-3 via pip, conda, CRAN, or download the standalone jar.
+  </Card>
+  <Card title="Algorithm reference" icon="brain" href="/algorithms/overview">
+    Detailed documentation for every supported algorithm.
+  </Card>
+  <Card title="AutoML" icon="wand-magic-sparkles" href="/algorithms/automl">
+    Automatically train and rank hundreds of models with a single call.
+  </Card>
+</CardGroup>

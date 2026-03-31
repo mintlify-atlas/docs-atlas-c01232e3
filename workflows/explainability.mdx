@@ -1,0 +1,341 @@
+---
+title: "Model Explainability"
+description: "Use h2o.explain() and h2o.explain_row() to generate variable importance plots, SHAP summaries, partial dependence plots, residual analysis, and model correlation heatmaps."
+---
+
+H2O-3's explainability interface wraps a collection of explanation methods and visualizations into two functions: `h2o.explain()` for global explanations and `h2o.explain_row()` for row-level (local) explanations. Both work with individual models, lists of models, and AutoML objects.
+
+Visualizations use [ggplot2](https://ggplot2.tidyverse.org/) in R and [matplotlib](https://matplotlib.org/) in Python.
+
+## Overview
+
+<Tabs>
+  <Tab title="Global explanations">
+    `h2o.explain()` generates a suite of explanations for a model or group of models against a holdout dataset.
+
+    **For a single model:**
+    - Confusion Matrix (classification only)
+    - Residual Analysis (regression only)
+    - Variable Importance
+    - Partial Dependence (PD) Plots
+    - Individual Conditional Expectation (ICE) Plots
+
+    **For a list of models or AutoML object:**
+    All of the above, plus:
+    - Leaderboard
+    - Variable Importance Heatmap
+    - Model Correlation Heatmap
+    - SHAP Summary of the top tree-based model
+    - Partial Dependence Multi-model Plots
+  </Tab>
+  <Tab title="Local explanations">
+    `h2o.explain_row()` generates explanations for a single row of data.
+
+    **For a group of models:**
+    - SHAP Contribution Plot (top tree-based model)
+    - ICE Plots
+
+    **For a single model:**
+    - SHAP Contribution Plot (tree-based models only)
+    - ICE Plots
+  </Tab>
+</Tabs>
+
+## Quick start
+
+<CodeGroup>
+
+```python Python
+import h2o
+from h2o.automl import H2OAutoML
+h2o.init()
+
+# Import wine quality dataset
+f = "https://h2o-public-test-data.s3.amazonaws.com/smalldata/wine/winequality-redwhite-no-BOM.csv"
+df = h2o.import_file(f)
+y = "quality"
+
+splits = df.split_frame(ratios=[0.8], seed=1)
+train = splits[0]
+test = splits[1]
+
+# Train AutoML for 60 seconds
+aml = H2OAutoML(max_runtime_secs=60, seed=1)
+aml.train(y=y, training_frame=train)
+
+# Global explanations for all AutoML models
+exa = aml.explain(test)
+
+# Global explanations for the leader model only
+exm = aml.leader.explain(test)
+
+# Local explanation for the first row (0-indexed in Python)
+aml.explain_row(test, row_index=0)
+```
+
+```r R
+library(h2o)
+h2o.init()
+
+# Import wine quality dataset
+f <- "https://h2o-public-test-data.s3.amazonaws.com/smalldata/wine/winequality-redwhite-no-BOM.csv"
+df <- h2o.importFile(f)
+y <- "quality"
+
+splits <- h2o.splitFrame(df, ratios = 0.8, seed = 1)
+train <- splits[[1]]
+test <- splits[[2]]
+
+# Train AutoML for 60 seconds
+aml <- h2o.automl(y = y, training_frame = train, max_runtime_secs = 60, seed = 1)
+
+# Global explanations for all AutoML models
+exa <- h2o.explain(aml, test)
+exa
+
+# Global explanations for the leader model only
+exm <- h2o.explain(aml@leader, test)
+exm
+
+# Local explanation for the first row (1-indexed in R)
+h2o.explain_row(aml, test, row_index = 1)
+```
+
+</CodeGroup>
+
+<Note>In R, the `H2OExplanation` object does not print automatically when saved to a variable. Call `print(exa)` or simply type `exa` to render it. In Python, the explanations print immediately even when saved to a variable.</Note>
+
+## Parameters
+
+| Parameter | Description |
+|---|---|
+| `object` (R) | An H2O model, AutoML object, list of models, or H2OFrame with a `model_id` column (e.g. AutoML leaderboard). |
+| `newdata` (R) / `frame` (Python) | Holdout H2OFrame used for residual analysis, SHAP, and other explanations. |
+| `columns` | Column names to include in column-based explanations (PDP, ICE, SHAP). When specified, `top_n_features` is ignored. |
+| `top_n_features` | Number of top features (ranked by variable importance) to include in column-based explanations. Defaults to 5. |
+| `include_explanations` | Generate only the listed explanation types. Mutually exclusive with `exclude_explanations`. |
+| `exclude_explanations` | Skip the listed explanation types. |
+| `plot_overrides` | Override arguments for individual plots (e.g., `list(shap_summary_plot = list(top_n_features = 50))`). |
+| `row_index` | Row to explain (0-based in Python, 1-based in R). Used with `explain_row()`. |
+
+## Variable importance
+
+The variable importance plot shows the relative contribution of each feature to the model's predictions.
+
+<CodeGroup>
+
+```python Python
+# Variable importance for a single model
+va_plot = model.varimp_plot()
+```
+
+```r R
+# Variable importance for a single model
+va_plot <- h2o.varimp_plot(model)
+va_plot
+```
+
+</CodeGroup>
+
+<Note>Variable importance is not currently available for Stacked Ensemble models. When using `explain()` on an AutoML object with a Stacked Ensemble at the top, H2O-3 automatically shows variable importance for the top non-stacked base model instead.</Note>
+
+## Variable importance heatmap
+
+The variable importance heatmap compares feature importance across multiple models. Categorical columns that were one-hot encoded (e.g., for Deep Learning or XGBoost) are summarized back to the original column level. Models and variables are ordered by similarity.
+
+<CodeGroup>
+
+```python Python
+# Variable importance heatmap across all AutoML models
+va_heatmap = aml.varimp_heatmap()
+
+# Use a subset of models sorted by MAE
+va_heatmap = h2o.varimp_heatmap(aml.leaderboard.sort("mae").head(10))
+```
+
+```r R
+# Variable importance heatmap across all AutoML models
+va_heatmap <- h2o.varimp_heatmap(aml)
+va_heatmap
+
+# Use a subset of models sorted by MAE
+va_heatmap <- h2o.varimp_heatmap(h2o.head(h2o.arrange(aml@leaderboard, mae), n = 10))
+```
+
+</CodeGroup>
+
+## SHAP summary plots
+
+SHAP (SHapley Additive exPlanations) summary plots show each feature's contribution for every row in the holdout dataset. The sum of feature contributions and the bias term equals the model's raw prediction before applying the inverse link function.
+
+H2O-3 uses **TreeSHAP**, which is exact for tree-based models. Note that when features are correlated, TreeSHAP may assign higher importance to a feature that had no direct influence on a prediction.
+
+<CodeGroup>
+
+```python Python
+# SHAP summary plot for a single model
+shap_plot = model.shap_summary_plot(test)
+```
+
+```r R
+# SHAP summary plot for a single model
+shap_plot <- h2o.shap_summary_plot(model, test)
+shap_plot
+```
+
+</CodeGroup>
+
+### Row-level SHAP
+
+Use `shap_explain_row_plot()` to see feature contributions for a single prediction.
+
+<CodeGroup>
+
+```python Python
+# SHAP for row index 0 (Python is 0-based)
+shapr_plot = model.shap_explain_row_plot(test, row_index=0)
+```
+
+```r R
+# SHAP for row index 1 (R is 1-based)
+shapr_plot <- h2o.shap_explain_row_plot(model, test, row_index = 1)
+shapr_plot
+```
+
+</CodeGroup>
+
+## Partial dependence plots (PDP)
+
+Partial dependence plots show the marginal effect of a single feature on the model's predicted outcome, averaged over all other features. PDP assumes the target feature is independent of the remaining features.
+
+<CodeGroup>
+
+```python Python
+# PDP for a single model and feature
+pd_plot = model.pd_plot(test, column="alcohol")
+
+# PDP across multiple models (AutoML)
+pd_multi = aml.pd_multi_plot(test, column="alcohol")
+
+# PDP for a specific row becomes an ICE plot
+pd_row = model.pd_plot(test, column="alcohol", row_index=0)
+```
+
+```r R
+# PDP for a single model and feature
+pd_plot <- h2o.pd_plot(model, test, column = "alcohol")
+pd_plot
+
+# PDP across multiple models (AutoML)
+pd_multi <- h2o.pd_multi_plot(aml, test, column = "alcohol")
+pd_multi
+```
+
+</CodeGroup>
+
+## Individual Conditional Expectation (ICE) plots
+
+ICE plots show the marginal effect of a feature for each individual instance, rather than the average across all instances. This reveals interaction effects that PDP can mask.
+
+<CodeGroup>
+
+```python Python
+# ICE plot for a feature
+ice_plot = model.ice_plot(test, column="alcohol")
+```
+
+```r R
+# ICE plot for a feature
+ice_plot <- h2o.ice_plot(model, test, column = "alcohol")
+ice_plot
+```
+
+</CodeGroup>
+
+## Residual analysis
+
+Residual analysis plots fitted values vs. residuals on the test dataset. Randomly distributed residuals indicate a well-specified model. Patterns may indicate missing non-linear effects, heteroscedasticity, or autocorrelation.
+
+<Note>If you see "striped" patterns in the residuals, this is typically caused by an integer-valued (rather than continuous) response variable, not a model issue.</Note>
+
+<CodeGroup>
+
+```python Python
+# Residual analysis plot (regression models only)
+ra_plot = model.residual_analysis_plot(test)
+```
+
+```r R
+# Residual analysis plot (regression models only)
+ra_plot <- h2o.residual_analysis_plot(model, test)
+ra_plot
+```
+
+</CodeGroup>
+
+## Model correlation heatmap
+
+The model correlation heatmap shows how similar the predictions of different models are. For classification, it measures the frequency of identical predictions. Models are ordered by hierarchical clustering of their similarity.
+
+<CodeGroup>
+
+```python Python
+# Model correlation heatmap across all AutoML models
+mc_plot = aml.model_correlation_heatmap(test)
+
+# Use a subset of models
+mc_plot = h2o.model_correlation_heatmap(
+    aml.leaderboard.sort("mae").head(10), test
+)
+```
+
+```r R
+# Model correlation heatmap across all AutoML models
+mc_plot <- h2o.model_correlation_heatmap(aml, test)
+mc_plot
+
+# Use a subset of models
+mc_plot <- h2o.model_correlation_heatmap(
+    h2o.head(h2o.arrange(aml@leaderboard, mae), n = 10), test
+)
+```
+
+</CodeGroup>
+
+## Selecting specific explanations
+
+Use `include_explanations` or `exclude_explanations` to control which explanations are generated.
+
+Available explanation types:
+
+| Name | Scope |
+|---|---|
+| `"leaderboard"` | AutoML and list of models only |
+| `"residual_analysis"` | Regression only |
+| `"confusion_matrix"` | Classification only |
+| `"varimp"` | Not available for Stacked Ensembles |
+| `"varimp_heatmap"` | Multi-model only |
+| `"model_correlation_heatmap"` | Multi-model only |
+| `"shap_summary"` | Single models only |
+| `"pdp"` | All |
+| `"ice"` | All |
+
+<CodeGroup>
+
+```python Python
+# Only generate variable importance and PDP
+exm = model.explain(test, include_explanations=["varimp", "pdp"])
+
+# Skip SHAP (can be slow for large datasets)
+exm = model.explain(test, exclude_explanations=["shap_summary"])
+```
+
+```r R
+# Only generate variable importance and PDP
+exm <- h2o.explain(model, test, include_explanations = c("varimp", "pdp"))
+
+# Skip SHAP (can be slow for large datasets)
+exm <- h2o.explain(model, test, exclude_explanations = c("shap_summary"))
+```
+
+</CodeGroup>

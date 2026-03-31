@@ -1,0 +1,283 @@
+---
+title: "Security"
+description: "Configure authentication, TLS/HTTPS, and network security for H2O deployments. Covers Basic auth, LDAP, Kerberos, PAM, and firewall port requirements."
+keywords: ["security", "authentication", "HTTPS", "TLS", "Kerberos", "LDAP", "PAM", "Basic auth", "firewall", "port 54321"]
+---
+
+H2O's security features are designed for deployment inside a trusted data center. This page covers what is secured, how to configure it, and the network requirements.
+
+## Security model summary
+
+H2O's security model rests on a few key assumptions:
+
+- H2O runs inside a secure network perimeter. It is not designed to withstand internet-facing denial-of-service attacks.
+- HTTP traffic between clients and H2O should be encrypted via HTTPS (both interactive and programmatic sessions).
+- Once a user is authenticated, they have full access — H2O supports authentication but not fine-grained authorization or ACLs.
+- Each user starts their own H2O cluster. H2O clusters are not intended to be shared among multiple users.
+- All data is in-memory; restarting a cluster wipes all data from memory with nothing left on disk to clean.
+
+---
+
+## Network ports
+
+| Port | Protocol | Purpose |
+|---|---|---|
+| **54321** | TCP | H2O Flow web UI and REST API (client-facing) |
+| **54322** | TCP + UDP | Internal node-to-node communication |
+
+<Warning>
+Port 54322 carries a proprietary binary protocol between cluster nodes. This traffic is not encrypted by default. An attacker with network access and packet capture tools can potentially extract data from this channel. Secure your network perimeter or enable internal TLS (see below).
+</Warning>
+
+Open a range of at least 20 ports around 54321 for Hadoop deployments, as H2O uses adaptive port selection when running multiple nodes on the same physical host.
+
+---
+
+## HTTPS / TLS
+
+HTTPS encrypts traffic between clients (browser, R, Python) and H2O's embedded web port. It uses a Java Keystore (JKS) backed by Jetty 9 and the Java runtime.
+
+### Creating a self-signed keystore
+
+```bash
+# Remove any existing keystore
+rm -f mykeystore.jks
+
+# Generate a new 2048-bit RSA keystore
+keytool -genkey -keyalg RSA \
+    -keystore mykeystore.jks \
+    -storepass mypass \
+    -keysize 2048
+```
+
+### Enabling HTTPS
+
+<CodeGroup>
+
+```bash Standalone H2O
+java -jar h2o.jar -jks mykeystore.jks -jks_pass mypass
+```
+
+```bash H2O on Hadoop
+hadoop jar h2odriver.jar \
+    -nodes 3 \
+    -mapperXmx 10g \
+    -jks h2o.jks \
+    -jks_pass mypass \
+    -output hdfsOutputDir
+```
+
+```bash Sparkling Water
+$SPARK_HOME/bin/spark-submit \
+    --class water.SparklingWaterDriver \
+    --conf spark.ext.h2o.jks=/path/to/h2o.jks \
+    --conf spark.ext.h2o.jks.pass=mypassword \
+    sparkling-water-assembly-all.jar
+```
+
+</CodeGroup>
+
+**TLS startup flags**:
+
+| Flag | Description |
+|---|---|
+| `-jks <filename>` | Path to Java keystore file |
+| `-jks_pass <password>` | Keystore password (default: `h2oh2o`) |
+| `-jks_alias <alias>` | Optional — which certificate from the keystore to use |
+
+### Connecting clients over HTTPS
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init(ip="a.b.c.d", port=54321, https=True, insecure=False)
+```
+
+```r R
+h2o.init(ip = "a.b.c.d", port = 54321, https = TRUE, insecure = FALSE)
+```
+
+</CodeGroup>
+
+<Note>
+HTTPS and authentication can be enabled independently or together. You can add authentication without HTTPS (though this is not recommended) or use HTTPS without authentication.
+</Note>
+
+---
+
+## Authentication options
+
+H2O supports four authentication mechanisms, all surfaced to the user as HTTP Basic Auth for client connections.
+
+### Basic auth (username/password hash file)
+
+The simplest option. A flat file maps usernames to hashed passwords.
+
+```bash
+java -jar h2o.jar \
+    -hash_login \
+    -login_conf /etc/h2o/users.properties
+```
+
+Format of `users.properties` (uses Jetty's `HashLoginService` format):
+
+```properties users.properties
+alice: MD5:5f4dcc3b5aa765d61d8327deb882cf99,user
+bob: MD5:7c6a180b36896a0a8c02787eeafb0e4c,user
+```
+
+### LDAP authentication
+
+Connect H2O's authentication to an existing LDAP directory server.
+
+```bash
+java -jar h2o.jar \
+    -ldap_login \
+    -login_conf /etc/h2o/ldap.conf
+```
+
+Example `ldap.conf` (Jetty LDAP LoginModule):
+
+```bash ldap.conf
+ldaploginmodule {
+    ai.h2o.org.eclipse.jetty.plus.jaas.spi.LdapLoginModule required
+    debug="true"
+    useLdaps="false"
+    contextFactory="com.sun.jndi.ldap.LdapCtxFactory"
+    hostname="ldap.example.com"
+    port="389"
+    bindDn="cn=admin,dc=example,dc=com"
+    bindPassword="secret"
+    authenticationMethod="simple"
+    forceBindingLogin="true"
+    userBaseDn="ou=users,dc=example,dc=com";
+};
+```
+
+### Kerberos authentication
+
+Kerberos integrates with H2O on Hadoop via kinit. Because H2O runs as a standard Hadoop MapReduce job, it inherits the submitting user's Kerberos credentials with no H2O-specific code changes.
+
+For standalone H2O with Kerberos-based HTTP Basic Auth:
+
+```bash
+java -jar h2o.jar \
+    -kerberos_login \
+    -login_conf /etc/h2o/kerb.conf
+```
+
+Example `kerb.conf`:
+
+```bash kerb.conf
+krb5loginmodule {
+    com.sun.security.auth.module.Krb5LoginModule required
+    useTicketCache="true"
+    renewTGT="true";
+};
+```
+
+Launch with Kerberos on Hadoop:
+
+```bash
+hadoop jar h2odriver.jar \
+    -nodes 3 \
+    -mapperXmx 6g \
+    -principal hduser@EXAMPLE.COM \
+    -keytab /home/hduser/hduser.keytab \
+    -output hdfsOutputDir
+```
+
+### PAM authentication
+
+PAM (Pluggable Authentication Modules) delegates to the operating system's authentication stack, enabling integration with system accounts, SSSD, or any PAM-backed directory.
+
+```bash
+java -jar h2o.jar \
+    -pam_login \
+    -login_conf /etc/h2o/pam.conf
+```
+
+---
+
+## Connecting with credentials
+
+Once authentication is enabled, all clients must supply a username and password:
+
+<CodeGroup>
+
+```python Python
+import h2o
+h2o.init(
+    ip="a.b.c.d",
+    port=54321,
+    username="myusername",
+    password="mypassword"
+)
+```
+
+```r R
+h2o.init(
+    ip = "a.b.c.d",
+    port = 54321,
+    username = "myusername",
+    password = "mypassword"
+)
+```
+
+</CodeGroup>
+
+When HTTPS is also enabled:
+
+```python
+h2o.init(ip="a.b.c.d", port=54321, https=True, insecure=False,
+         username="myusername", password="mypassword")
+```
+
+---
+
+## Enforcing security settings in Hadoop deployments
+
+System administrators can prevent users from starting H2O without required security flags by creating an implicit arguments file at `/etc/h2o/h2odriver.args`. Each argument must be on its own line:
+
+```bash /etc/h2o/h2odriver.args
+h2o_ssl_jks_internal=keystore.jks
+h2o_ssl_jks_password=password
+h2o_ssl_jts_internal=truststore.jts
+h2o_ssl_jts_password=password
+```
+
+H2O reads this file at startup and merges these arguments with any user-supplied ones. Users cannot override them.
+
+---
+
+## Data security on Hadoop
+
+H2O on Hadoop inherits the HDFS file permissions of the user who launched it:
+
+1. Data lives in HDFS with standard file permissions.
+2. The user runs `hadoop jar h2odriver.jar` — the job runs under that user's identity.
+3. H2O can only access HDFS files the user is permitted to read.
+4. Only the user who started the cluster is authenticated to access it.
+5. Kerberos (`kinit`) works seamlessly — no H2O-specific configuration needed beyond passing `-principal` and `-keytab` flags.
+
+For Sparkling Water on YARN, the same model applies: the Spark job inherits the submitting user's HDFS permissions.
+
+---
+
+## Access control summary
+
+<AccordionGroup>
+  <Accordion title="What H2O does secure">
+    - HDFS file access via OS and HDFS permissions
+    - Embedded web port (54321) via HTTPS and/or HTTP Basic Auth
+    - Internal node-to-node traffic via optional TLS (configured through JKS)
+    - Kerberos identity propagation on Hadoop
+  </Accordion>
+
+  <Accordion title="What H2O does not secure">
+    - Fine-grained authorization or ACLs — authentication grants full cluster access
+    - Protection against denial-of-service attacks
+    - Certificate validation on the R/Python client side (client-side cert checking is not yet implemented)
+  </Accordion>
+</AccordionGroup>

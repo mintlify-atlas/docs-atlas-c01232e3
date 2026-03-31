@@ -1,0 +1,309 @@
+---
+title: "H2OAutoML"
+description: "Automated machine learning in H2O. H2OAutoML trains and evaluates many models automatically and ranks them on a leaderboard."
+---
+
+`H2OAutoML` automates the supervised machine learning model training process. It trains multiple models — including GBM, XGBoost, GLM, DRF, XRT, DeepLearning, and Stacked Ensembles — cross-validates them by default, and ranks them on a leaderboard.
+
+```python
+from h2o.automl import H2OAutoML
+```
+
+---
+
+## Constructor
+
+```python
+H2OAutoML(
+    nfolds=-1,
+    balance_classes=False,
+    class_sampling_factors=None,
+    max_after_balance_size=5.0,
+    max_runtime_secs=None,
+    max_runtime_secs_per_model=None,
+    max_models=None,
+    distribution="AUTO",
+    stopping_metric="AUTO",
+    stopping_tolerance=None,
+    stopping_rounds=3,
+    seed=None,
+    project_name=None,
+    exclude_algos=None,
+    include_algos=None,
+    exploitation_ratio=-1,
+    modeling_plan=None,
+    preprocessing=None,
+    monotone_constraints=None,
+    keep_cross_validation_predictions=False,
+    keep_cross_validation_models=False,
+    keep_cross_validation_fold_assignment=False,
+    sort_metric="AUTO",
+    custom_metric_func=None,
+    export_checkpoints_dir=None,
+    verbosity="warn"
+)
+```
+
+### Stopping criteria
+
+<ParamField path="max_runtime_secs" type="integer">
+  Maximum total time (in seconds) for the AutoML run. When both `max_runtime_secs` and `max_models` are specified, AutoML stops when either limit is reached. If neither is specified, defaults to `3600` seconds (1 hour).
+</ParamField>
+
+<ParamField path="max_runtime_secs_per_model" type="integer" default="0">
+  Maximum time in seconds dedicated to each individual model. `0` disables the per-model limit.
+</ParamField>
+
+<ParamField path="max_models" type="integer">
+  Maximum number of models to build, excluding Stacked Ensemble models. Set this parameter to ensure reproducibility: all models will be trained until convergence and none will be constrained by a time budget.
+</ParamField>
+
+<ParamField path="stopping_metric" type="string" default="AUTO">
+  Metric used for early stopping during the AutoML run. `"AUTO"` resolves to `"logloss"` for classification and `"deviance"` for regression. Other options: `"mse"`, `"rmse"`, `"mae"`, `"rmsle"`, `"auc"`, `"aucpr"`, `"misclassification"`, `"mean_per_class_error"`, `"r2"`.
+</ParamField>
+
+<ParamField path="stopping_tolerance" type="float">
+  Relative tolerance for the metric-based stopping criterion. Defaults to `0.001` for datasets with at least 1 million rows; otherwise computed from dataset size.
+</ParamField>
+
+<ParamField path="stopping_rounds" type="integer" default="3">
+  Stop training new models when the stopping metric has not improved for this many consecutive models. `0` disables this check.
+</ParamField>
+
+### Cross-validation
+
+<ParamField path="nfolds" type="integer" default="-1">
+  Number of folds for k-fold cross-validation. `-1` lets AutoML decide (uses 5-fold CV or a blending frame depending on dataset size). `0` disables CV. Minimum value when setting explicitly is `2`.
+</ParamField>
+
+<ParamField path="keep_cross_validation_predictions" type="boolean" default="False">
+  Retain cross-validation predictions. Required when continuing an existing AutoML project with repeated `train()` calls.
+</ParamField>
+
+<ParamField path="keep_cross_validation_models" type="boolean" default="False">
+  Retain cross-validation sub-models. Keeping them consumes more cluster memory.
+</ParamField>
+
+### Algorithm selection
+
+<ParamField path="exclude_algos" type="string[]">
+  Algorithms to skip. Available values: `"DRF"`, `"GLM"`, `"XGBoost"`, `"GBM"`, `"DeepLearning"`, `"StackedEnsemble"`. Cannot be combined with `include_algos`.
+
+  ```python
+  exclude_algos=["DeepLearning", "StackedEnsemble"]
+  ```
+</ParamField>
+
+<ParamField path="include_algos" type="string[]">
+  Restrict AutoML to only these algorithms. Cannot be combined with `exclude_algos`.
+
+  ```python
+  include_algos=["GBM", "XGBoost"]
+  ```
+</ParamField>
+
+### Class balancing
+
+<ParamField path="balance_classes" type="boolean" default="False">
+  Oversample minority classes to balance the class distribution. Only applicable for classification.
+</ParamField>
+
+<ParamField path="class_sampling_factors" type="float[]">
+  Desired over/under-sampling ratios per class (in lexicographic order). Requires `balance_classes=True`. Auto-computed if not specified.
+</ParamField>
+
+<ParamField path="max_after_balance_size" type="float" default="5.0">
+  Maximum relative size of the training dataset after class balancing. Majority classes are undersampled if the oversampled size exceeds this limit.
+</ParamField>
+
+### Reproducibility and project management
+
+<ParamField path="seed" type="integer">
+  Random seed. AutoML guarantees reproducibility only when `max_models` or early stopping is used, because `max_runtime_secs` is resource-dependent.
+</ParamField>
+
+<ParamField path="project_name" type="string">
+  Name for this AutoML project. Auto-generated from the training frame ID if not specified. Reuse the same name to continue training additional models on an existing project.
+</ParamField>
+
+### Leaderboard
+
+<ParamField path="sort_metric" type="string" default="AUTO">
+  Metric used to sort the leaderboard. `"AUTO"` resolves to `"auc"` (binomial), `"mean_per_class_error"` (multinomial), or `"deviance"` (regression).
+</ParamField>
+
+### Other
+
+<ParamField path="distribution" type="string | dict" default="AUTO">
+  Distribution family used by supporting algorithms. Options: `"AUTO"`, `"bernoulli"`, `"multinomial"`, `"gaussian"`, `"poisson"`, `"gamma"`, `"tweedie"`, `"laplace"`, `"quantile"`, `"huber"`, `"custom"`. Parameterized distributions can be passed as a dict, e.g., `dict(type="tweedie", tweedie_power=1.5)`.
+</ParamField>
+
+<ParamField path="verbosity" type="string" default="warn">
+  Verbosity of backend messages during training. One of `None`, `"debug"`, `"info"`, `"warn"`, `"error"`.
+</ParamField>
+
+---
+
+## Methods
+
+### train
+
+```python
+aml.train(
+    x=None, y=None,
+    training_frame=None,
+    fold_column=None,
+    weights_column=None,
+    validation_frame=None,
+    leaderboard_frame=None,
+    blending_frame=None
+)
+```
+
+Start the AutoML training process.
+
+<ParamField path="x" type="string[] | integer[]">
+  Predictor column names or indices. When `None`, all columns except `y` are used.
+</ParamField>
+
+<ParamField path="y" type="string | integer" required>
+  Response column name or index.
+</ParamField>
+
+<ParamField path="training_frame" type="H2OFrame" required>
+  Training dataset.
+</ParamField>
+
+<ParamField path="fold_column" type="string">
+  Column with pre-assigned cross-validation fold indices.
+</ParamField>
+
+<ParamField path="weights_column" type="string">
+  Column containing per-row observation weights.
+</ParamField>
+
+<ParamField path="validation_frame" type="H2OFrame">
+  Validation dataset. Only used when `nfolds=0`. When cross-validation is active, cross-validation metrics take precedence for early stopping.
+</ParamField>
+
+<ParamField path="leaderboard_frame" type="H2OFrame">
+  Test dataset used to score the leaderboard. When omitted, cross-validation metrics are used.
+</ParamField>
+
+<ParamField path="blending_frame" type="H2OFrame">
+  Frame used for training Stacked Ensemble metalearners (blending mode). Only used when `nfolds=0`.
+</ParamField>
+
+---
+
+### predict
+
+```python
+predictions = aml.predict(test_data)
+```
+
+Generate predictions using the current leader model.
+
+<ParamField path="test_data" type="H2OFrame" required>
+  Data to score.
+</ParamField>
+
+```python
+pred = aml.predict(test)
+```
+
+---
+
+### get_leaderboard
+
+```python
+lb = aml.get_leaderboard(extra_columns="ALL")
+```
+
+Return the leaderboard with optional additional columns.
+
+<ParamField path="extra_columns" type="string | string[]">
+  Extra metric columns to include. Pass `"ALL"` for all available metrics, or a list of specific metric names.
+</ParamField>
+
+---
+
+## Properties
+
+### leaderboard
+
+```python
+aml.leaderboard  # H2OFrame
+```
+
+The leaderboard H2OFrame ranking all models by the sort metric. Columns include `model_id` and the primary evaluation metric.
+
+```python
+aml.leaderboard.head(20)
+```
+
+---
+
+### leader
+
+```python
+aml.leader  # H2OEstimator
+```
+
+The best-performing model from the leaderboard. This is a fully trained H2O model object on which you can call any model method (e.g., `predict()`, `model_performance()`, `varimp()`).
+
+```python
+best_model = aml.leader
+perf = best_model.model_performance(test)
+```
+
+---
+
+### project_name
+
+```python
+aml.project_name  # str
+```
+
+The project name associated with this AutoML run. Use this to retrieve the same run later with `h2o.automl.get_automl(project_name)`.
+
+---
+
+## Full example
+
+```python
+import h2o
+from h2o.automl import H2OAutoML
+
+h2o.init()
+
+# Load training and test data
+train = h2o.import_file("https://s3.amazonaws.com/erin-data/higgs/higgs_train_10k.csv")
+test = h2o.import_file("https://s3.amazonaws.com/erin-data/higgs/higgs_test_5k.csv")
+
+y = "response"
+x = [col for col in train.columns if col != y]
+
+# Cast response to factor for classification
+train[y] = train[y].asfactor()
+test[y] = test[y].asfactor()
+
+# Run AutoML for 30 seconds
+aml = H2OAutoML(max_runtime_secs=30, seed=42)
+aml.train(x=x, y=y, training_frame=train)
+
+# Inspect leaderboard
+print(aml.leaderboard.head(10))
+
+# Evaluate best model on test set
+perf = aml.leader.model_performance(test)
+print(perf.auc())
+
+# Predict with the leader model
+pred = aml.predict(test)
+pred.head()
+```
+
+<Tip>
+  To ensure reproducibility, set `max_models` instead of (or in addition to) `max_runtime_secs`. This guarantees the same models are trained regardless of hardware speed.
+</Tip>

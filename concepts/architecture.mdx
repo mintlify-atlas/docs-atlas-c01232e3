@@ -1,0 +1,207 @@
+---
+title: "Architecture"
+description: "How H2O-3 works as a distributed in-memory platform for large-scale machine learning."
+keywords: ["architecture", "distributed", "DKV", "MRTask", "REST API", "Flow", "cluster"]
+---
+
+H2O-3 is a distributed, in-memory machine learning platform. Each node in an H2O cluster is a single JVM process. Nodes communicate as peers — there is no master node governing data distribution. Data and computation are co-located: work travels to the data, not the other way around.
+
+## Module structure
+
+H2O-3 is built from layered modules. Each layer depends only on the ones below it.
+
+```
+h2o-genmodel   (standalone POJO/MOJO scoring — no H2O runtime required)
+      ↓
+h2o-core       (distributed computing engine: DKV, REST API, Frame/Vec/Chunk, MRTask)
+      ↓
+h2o-algos      (ML algorithms: GBM, GLM, Deep Learning, Random Forest, etc.)
+      ↓
+h2o-automl     (AutoML functionality)
+      ↓
+h2o-app        (full assembly: core + algos + Flow web UI)
+```
+
+<Note>
+The `h2o-genmodel` module has no dependency on the H2O runtime, which makes it suitable for embedding POJO/MOJO models in production systems without running a cluster.
+</Note>
+
+Key modules:
+
+| Module | Responsibility |
+|---|---|
+| `h2o-core` | DKV, REST API infrastructure, Frame/Vec/Chunk data structures, MRTask framework |
+| `h2o-algos` | All ML algorithms (each extends `hex.ModelBuilder`) |
+| `h2o-web` | Flow web UI (Node.js, compiled into resources) |
+| `h2o-genmodel` | Standalone model scoring — no H2O runtime dependencies |
+| `h2o-bindings` | Generates Python and R client code from REST schemas |
+| `h2o-persist-{hdfs,s3,gcs}` | Storage backends for distributed file systems |
+
+## Distributed Key-Value store (DKV)
+
+Every object in H2O-3 — frames, models, jobs — lives in the **DKV**, a distributed in-memory key-value store spread across all cluster nodes.
+
+- Each object has a home node determined by consistent hashing of its `Key`.
+- Reads and writes use `DKV.get(key)` and `DKV.put(key, value)`.
+- The cluster locks via Paxos before the first DKV write, preventing node joins mid-computation.
+
+```java
+// Internal Java — write and read an object from the DKV
+DKV.put(myKey, myValue);
+Value val = DKV.get(myKey);
+```
+
+<Tip>
+Because data is distributed by key hash, accessing a value may involve a network hop to its home node. H2O-3's MRTask framework avoids this by sending computation to the data.
+</Tip>
+
+## Vec / Chunk / Frame data model
+
+H2O-3 stores tabular data using a three-level hierarchy.
+
+```
+Frame
+ └── Vec  (one per column — distributed across nodes)
+      └── Chunk  (contiguous block of ~1K–1M rows, lives on one node)
+```
+
+- A **Frame** is the user-visible table (rows × columns).
+- A **Vec** is a single distributed column, analogous to a database column.
+- A **Chunk** is a contiguous block of rows within a Vec stored on a single node.
+
+All Vecs in a Frame share a `VectorGroup`, which guarantees **chunk alignment**: chunk _i_ of column A covers exactly the same row range as chunk _i_ of column B. This makes row-wise iteration across columns efficient without any shuffling.
+
+## MRTask map-reduce framework
+
+`MRTask` is H2O-3's in-memory map-reduce framework. It is distinct from Hadoop MapReduce — it operates entirely within the JVM heap across cluster nodes.
+
+To write a distributed computation:
+
+1. Extend `MRTask` and override `map(Chunk c)`.
+2. Optionally override `reduce(MRTask mrt)` to aggregate results.
+3. Call `.doAll(frame)` (blocking) or `.dfork(frame)` (non-blocking) to execute.
+
+```java
+// Example: count non-zero values across a frame
+public class CountNonZero extends MRTask<CountNonZero> {
+    long _count;
+
+    @Override
+    public void map(Chunk c) {
+        for (int i = 0; i < c._len; i++) {
+            if (!c.isNA(i) && c.atd(i) != 0) _count++;
+        }
+    }
+
+    @Override
+    public void reduce(CountNonZero mrt) {
+        _count += mrt._count;
+    }
+}
+
+long total = new CountNonZero().doAll(frame)._count;
+```
+
+<Note>
+Computation moves to the data. Each chunk is processed on the node where it lives, and partial results reduce up a binary tree back to the calling node.
+</Note>
+
+## Node communication
+
+H2O-3 nodes communicate over two channels:
+
+| Channel | Used for |
+|---|---|
+| **UDP** | Heartbeats, small control messages, cluster membership |
+| **TCP** | Bulk data transfer (frame data, model serialization) |
+
+Nodes form a peer-to-peer cluster. There is no dedicated master node for data distribution — every node can serve any request.
+
+## REST API structure
+
+All client interactions (Python, R, Flow, Excel) go through H2O-3's versioned REST API. The server follows a **Handler → Route → Schema** pattern.
+
+<Steps>
+  <Step title="Route">
+    A `Route` maps an HTTP endpoint (e.g., `POST /3/ModelBuilders/gbm`) to a handler method.
+  </Step>
+  <Step title="Handler">
+    A `Handler` processes the request. Methods have the signature `(int version, SchemaType schema)`.
+  </Step>
+  <Step title="Schema">
+    A `Schema` is a versioned DTO that translates between the HTTP request/response and internal `Iced` objects. Fields annotated with `@API` become public parameters.
+  </Step>
+</Steps>
+
+Algorithm endpoints are registered automatically at startup. Each algorithm gets standardized routes:
+
+```
+POST /3/ModelBuilders/<algo>       — train a model
+GET  /3/Models/<model_id>          — retrieve a model
+POST /3/Predictions/models/<id>    — score new data
+GET  /3/Jobs/<job_id>              — poll job progress
+```
+
+### Iced serialization
+
+All distributed objects extend `Iced<T>` for auto-generated Java serialization. `Keyed<T>` extends `Iced` and adds DKV key management. Schemas also extend `Iced` and serve as versioned REST API data transfer objects.
+
+## Flow web UI
+
+Flow is H2O-3's notebook-style web interface. It is a JavaScript application bundled with the H2O JAR and served at `http://<host>:54321/flow/index.html`.
+
+From Flow you can:
+- Import and inspect data
+- Build and tune models interactively
+- Monitor running jobs and cluster health
+- Visualize model metrics and predictions
+
+<Tip>
+Start H2O locally with `java -jar h2o.jar`, then open `http://localhost:54321` to access Flow immediately.
+</Tip>
+
+## How clients interact with H2O-3
+
+The Python and R packages are thin REST clients. **Data never flows through the client.** An `H2OFrame` object in Python or R is a handle — a reference to data that lives in the cluster.
+
+```python
+import h2o
+h2o.init()
+
+# This sends a REST request. The data stays in the cluster.
+df = h2o.import_file("s3://my-bucket/data.csv")
+
+# Operations are sent as expression trees (Rapids) and evaluated server-side.
+result = df[df["age"] > 30, :]
+```
+
+```r
+library(h2o)
+h2o.init()
+
+df <- h2o.importFile("s3://my-bucket/data.csv")
+result <- df[df$age > 30, ]
+```
+
+## Deployment targets
+
+H2O-3 runs in several environments. All use the same `h2o.jar` artifact.
+
+<CardGroup cols={2}>
+  <Card title="Standalone" icon="server">
+    Single-node or multi-node flat network. Launch with `java -jar h2o.jar`. Nodes discover each other via multicast or `-flatfile`.
+  </Card>
+  <Card title="Hadoop (YARN)" icon="database">
+    Launch on an existing Hadoop cluster. H2O nodes run as YARN containers. Supports CDH, HDP, MapR, and EMR.
+  </Card>
+  <Card title="Spark (Sparkling Water)" icon="bolt">
+    Embed H2O inside a Spark application. H2O nodes run as Spark executors, enabling data sharing between Spark DataFrames and H2O Frames.
+  </Card>
+  <Card title="Kubernetes" icon="cube">
+    Deploy using the `h2o-open-source-k8s` Docker image. Nodes use the H2O Kubernetes operator or a headless service for discovery.
+  </Card>
+</CardGroup>
+
+<Warning>
+When running on Hadoop or Kubernetes, ensure that all H2O nodes can reach each other on both UDP and TCP. Firewall rules that block inter-node traffic will prevent the cluster from forming.
+</Warning>

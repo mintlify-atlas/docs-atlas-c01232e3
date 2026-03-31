@@ -1,0 +1,494 @@
+---
+title: "h2o Module"
+description: "Core functions exported from the h2o Python package for connecting to clusters, importing data, managing models, and interacting with H2O objects."
+---
+
+The `h2o` module is the top-level entry point for the H2O Python client. Import it with:
+
+```python
+import h2o
+```
+
+---
+
+## Connection
+
+### h2o.init
+
+```python
+h2o.init(
+    url=None, ip=None, port=None, name=None,
+    https=None, cacert=None, insecure=None,
+    username=None, password=None, cookies=None,
+    proxy=None, start_h2o=True, nthreads=-1,
+    ice_root=None, log_dir=None, log_level=None,
+    max_log_file_size=None, enable_assertions=True,
+    max_mem_size=None, min_mem_size=None,
+    strict_version_check=None, ignore_config=False,
+    extra_classpath=None, jvm_custom_args=None,
+    bind_to_localhost=True, verbose=True
+)
+```
+
+Attempt to connect to a local H2O server, or start a new one if no existing server is found.
+
+<ParamField path="url" type="string">
+  Full URL of the server to connect to. Can be used instead of `ip` + `port` + `https`.
+</ParamField>
+
+<ParamField path="ip" type="string">
+  The IP address or hostname of the server where H2O is running.
+</ParamField>
+
+<ParamField path="port" type="integer | string">
+  Port number that H2O is listening to.
+</ParamField>
+
+<ParamField path="name" type="string">
+  Cluster name. If `None`, the cluster name is not checked when connecting to an existing cluster. When starting a local cluster, a random name is generated if `None`.
+</ParamField>
+
+<ParamField path="https" type="boolean">
+  Set to `True` to connect via HTTPS instead of HTTP.
+</ParamField>
+
+<ParamField path="insecure" type="boolean">
+  When using HTTPS, set to `True` to disable SSL certificate verification.
+</ParamField>
+
+<ParamField path="username" type="string">
+  Username for basic authentication.
+</ParamField>
+
+<ParamField path="password" type="string">
+  Password for basic authentication.
+</ParamField>
+
+<ParamField path="proxy" type="dict">
+  Proxy server address as a `{scheme: address}` dictionary.
+</ParamField>
+
+<ParamField path="start_h2o" type="boolean" default="True">
+  If `False`, do not attempt to start a local H2O server when connection fails.
+</ParamField>
+
+<ParamField path="nthreads" type="integer" default="-1">
+  Number of threads for the new H2O server. `-1` uses all available cores.
+</ParamField>
+
+<ParamField path="log_dir" type="string">
+  Directory for H2O server logs when a new instance is started.
+</ParamField>
+
+<ParamField path="log_level" type="string">
+  Logger level for H2O. One of `"TRACE"`, `"DEBUG"`, `"INFO"`, `"WARN"`, `"ERRR"`, `"FATA"`. Defaults to `"INFO"`.
+</ParamField>
+
+<ParamField path="max_mem_size" type="integer | string">
+  Maximum memory for the new H2O server. Integer input is treated as gigabytes. String values support suffixes: `"160M"`, `"4G"`.
+</ParamField>
+
+<ParamField path="min_mem_size" type="integer | string">
+  Minimum memory for the new H2O server. Uses the same format as `max_mem_size`.
+</ParamField>
+
+<ParamField path="strict_version_check" type="boolean">
+  If `True`, raise an error when client and server versions do not match.
+</ParamField>
+
+<ParamField path="verbose" type="boolean" default="True">
+  Set to `False` to suppress connection status messages.
+</ParamField>
+
+```python
+import h2o
+h2o.init(ip="localhost", port=54321)
+```
+
+---
+
+### h2o.connect
+
+```python
+h2o.connect(
+    server=None, url=None, ip=None, port=None,
+    https=None, verify_ssl_certificates=None, cacert=None,
+    auth=None, proxy=None, cookies=None,
+    verbose=True, config=None, strict_version_check=False
+)
+```
+
+Connect to an existing H2O server. Unlike `h2o.init()`, this function does not attempt to start a new server.
+
+<ParamField path="url" type="string">
+  Full URL of the server to connect to.
+</ParamField>
+
+<ParamField path="ip" type="string">
+  IP address or hostname of the H2O server.
+</ParamField>
+
+<ParamField path="port" type="integer">
+  Port that H2O is listening on.
+</ParamField>
+
+<ParamField path="https" type="boolean">
+  Connect via HTTPS when `True`.
+</ParamField>
+
+<ParamField path="auth" type="tuple">
+  A `(username, password)` tuple for basic authentication, or a requests-compatible auth object.
+</ParamField>
+
+<ParamField path="strict_version_check" type="boolean" default="False">
+  Raise an error if the client and server versions do not match.
+</ParamField>
+
+```python
+conn = h2o.connect(url="http://127.0.0.1:54321")
+```
+
+---
+
+## Data import
+
+### h2o.import_file
+
+```python
+h2o.import_file(
+    path=None, destination_frame=None, parse=True,
+    header=0, sep=None, col_names=None, col_types=None,
+    na_strings=None, pattern=None, skipped_columns=None,
+    force_col_types=False, custom_non_data_line_markers=None,
+    partition_by=None, quotechar=None, escapechar=None,
+    tz_adjust_to_local=False
+)
+```
+
+Import one or more files into the H2O cluster using a distributed, multi-threaded pull. The path must be accessible from every node in the cluster.
+
+<ParamField path="path" type="string | list" required>
+  Path to the file or directory to import. Accepts a URL, local path, or S3/HDFS URI. A list of paths is also accepted.
+</ParamField>
+
+<ParamField path="destination_frame" type="string">
+  Key to assign to the imported frame. Auto-generated if not provided.
+</ParamField>
+
+<ParamField path="parse" type="boolean" default="True">
+  If `False`, returns a list of raw frame paths without parsing.
+</ParamField>
+
+<ParamField path="header" type="integer" default="0">
+  `-1` means first line is data, `0` means guess, `1` means first line is header.
+</ParamField>
+
+<ParamField path="sep" type="string">
+  Field separator character. Auto-detected if not provided.
+</ParamField>
+
+<ParamField path="col_names" type="string[]">
+  Column names for the imported frame.
+</ParamField>
+
+<ParamField path="col_types" type="string[] | object">
+  Column types as a list or `{column_name: type}` dict. Valid types: `"unknown"`, `"uuid"`, `"string"`, `"numeric"`, `"enum"`, `"time"`.
+</ParamField>
+
+<ParamField path="na_strings" type="string[] | string[][]">
+  Values to interpret as missing. Accepts a flat list, a list-of-lists per column, or a `{column: list}` dict.
+</ParamField>
+
+```python
+birds = h2o.import_file("https://s3.amazonaws.com/h2o-public-test-data/smalldata/pca_test/birds.csv")
+```
+
+---
+
+### h2o.upload_file
+
+```python
+h2o.upload_file(
+    path, destination_frame=None, header=0, sep=None,
+    col_names=None, col_types=None, na_strings=None,
+    skipped_columns=None, force_col_types=False,
+    quotechar=None, escapechar=None
+)
+```
+
+Upload a local file to the H2O cluster using a single-threaded push. Use `import_file` for large files where parallel ingestion is preferred.
+
+<ParamField path="path" type="string" required>
+  Local path to the file to upload.
+</ParamField>
+
+<ParamField path="destination_frame" type="string">
+  Key to assign to the resulting frame.
+</ParamField>
+
+<ParamField path="header" type="integer" default="0">
+  Header detection: `-1` (data), `0` (guess), `1` (header).
+</ParamField>
+
+<ParamField path="sep" type="string">
+  Field separator character.
+</ParamField>
+
+```python
+iris = h2o.upload_file("~/data/iris.csv")
+```
+
+---
+
+## Model persistence
+
+### h2o.save_model
+
+```python
+h2o.save_model(model, path="", force=False, export_cross_validation_predictions=False, filename=None)
+```
+
+Save an H2O model object to disk on the server's file system. The saved file can be loaded back with `h2o.load_model()`.
+
+<ParamField path="model" type="H2OModel" required>
+  The trained model object to save.
+</ParamField>
+
+<ParamField path="path" type="string" default="">
+  Path to the directory where the model will be saved (local, HDFS, or S3). Defaults to the current working directory.
+</ParamField>
+
+<ParamField path="force" type="boolean" default="False">
+  If `True`, overwrite an existing file at the destination.
+</ParamField>
+
+<ParamField path="export_cross_validation_predictions" type="boolean" default="False">
+  Include CV holdout frame predictions in the saved artifact.
+</ParamField>
+
+<ParamField path="filename" type="string">
+  Custom filename for the saved model. Defaults to the model ID.
+</ParamField>
+
+```python
+model_path = h2o.save_model(model, path="/tmp/models", force=True)
+```
+
+---
+
+### h2o.load_model
+
+```python
+h2o.load_model(path)
+```
+
+Load a saved H2O model from disk back into the cluster.
+
+<ParamField path="path" type="string" required>
+  The full path to the saved model file on the server's file system.
+</ParamField>
+
+```python
+model = h2o.load_model("/tmp/models/GBM_model_python_1234567890")
+```
+
+---
+
+### h2o.download_model
+
+```python
+h2o.download_model(model, path="", export_cross_validation_predictions=False, filename=None)
+```
+
+Download a model binary from the H2O cluster to the local machine running this Python session.
+
+<ParamField path="model" type="H2OModel" required>
+  The trained model object to download.
+</ParamField>
+
+<ParamField path="path" type="string" default="">
+  Local directory to save the model. Defaults to the current working directory.
+</ParamField>
+
+<ParamField path="filename" type="string">
+  Custom filename. Defaults to the model ID.
+</ParamField>
+
+---
+
+### h2o.upload_model
+
+```python
+h2o.upload_model(path)
+```
+
+Upload a binary model from the local machine to the H2O cluster.
+
+<ParamField path="path" type="string" required>
+  Local path to the previously downloaded binary model file.
+</ParamField>
+
+```python
+model = h2o.upload_model("/tmp/GBM_model_python_1234567890")
+```
+
+---
+
+## Cluster management
+
+### h2o.cluster_info
+
+```python
+h2o.cluster_info()
+```
+
+<Warning>
+  Deprecated. Use `h2o.cluster().show_status()` instead.
+</Warning>
+
+Display basic information about the currently connected H2O cluster.
+
+---
+
+### h2o.shutdown
+
+```python
+h2o.shutdown(prompt=False)
+```
+
+<Warning>
+  Deprecated. Use `h2o.cluster().shutdown()` instead.
+</Warning>
+
+Shut down the H2O cluster.
+
+<ParamField path="prompt" type="boolean" default="False">
+  If `True`, prompt for confirmation before shutting down.
+</ParamField>
+
+---
+
+## Object management
+
+### h2o.ls
+
+```python
+h2o.ls()
+```
+
+List all keys (frames and models) stored in the H2O cluster. Returns a Pandas DataFrame.
+
+```python
+h2o.ls()
+```
+
+---
+
+### h2o.remove
+
+```python
+h2o.remove(x, cascade=True)
+```
+
+Remove one or more objects from the H2O cluster.
+
+<ParamField path="x" type="H2OFrame | H2OEstimator | string | list" required>
+  The object(s) to remove. Accepts a frame, model, key string, or list of any combination.
+</ParamField>
+
+<ParamField path="cascade" type="boolean" default="True">
+  When `True`, also remove dependent objects (e.g. submodels).
+</ParamField>
+
+```python
+h2o.remove(frame)
+h2o.remove([frame, model])
+```
+
+---
+
+### h2o.remove_all
+
+```python
+h2o.remove_all(retained=None)
+```
+
+Remove all objects from the H2O cluster, with an option to retain specific keys.
+
+<ParamField path="retained" type="string[]">
+  Keys of models or frames to keep. Training and validation frames of retained models are also kept.
+</ParamField>
+
+---
+
+### h2o.get_model
+
+```python
+h2o.get_model(model_id)
+```
+
+Retrieve a model that already exists in the H2O cluster.
+
+<ParamField path="model_id" type="string" required>
+  The model ID string.
+</ParamField>
+
+```python
+model = h2o.get_model("GBM_model_python_1234567890")
+```
+
+---
+
+### h2o.get_frame
+
+```python
+h2o.get_frame(frame_id)
+```
+
+Retrieve a handle to an existing frame in the H2O cluster.
+
+<ParamField path="frame_id" type="string" required>
+  The frame ID string.
+</ParamField>
+
+```python
+frame = h2o.get_frame("iris.hex")
+```
+
+---
+
+## Grid search
+
+### h2o.grid
+
+Grid search is performed via `H2OGridSearch`. See the example below for the typical usage pattern.
+
+```python
+from h2o.grid.grid_search import H2OGridSearch
+from h2o.estimators.gbm import H2OGradientBoostingEstimator
+
+hyper_params = {
+    "ntrees": [50, 100],
+    "max_depth": [3, 5, 7],
+    "learn_rate": [0.01, 0.1],
+}
+
+grid = H2OGridSearch(
+    model=H2OGradientBoostingEstimator,
+    hyper_params=hyper_params,
+    search_criteria={"strategy": "RandomDiscrete", "max_models": 10, "seed": 42},
+)
+grid.train(x=x, y=y, training_frame=train)
+```
+
+<ParamField path="model" type="H2OEstimator class" required>
+  The estimator class (not an instance) to tune.
+</ParamField>
+
+<ParamField path="hyper_params" type="object" required>
+  Dictionary mapping parameter names to lists of values to search over.
+</ParamField>
+
+<ParamField path="search_criteria" type="object">
+  Dictionary controlling the search strategy. Keys include `strategy` (`"Cartesian"` or `"RandomDiscrete"`), `max_models`, `max_runtime_secs`, and `seed`.
+</ParamField>
